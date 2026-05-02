@@ -110,6 +110,25 @@ on:
         type: boolean
         default: false
 
+      # ==================== ZRAM 扩展选项 ====================
+      zram_full_algo:
+        description: "启用 ZRAM 完整算法支持（LZO/LZ4/LZ4HC/LZ4K/LZ4KD/DEFLATE/842/ZSTD，默认 lzo-rle）"
+        required: false
+        type: boolean
+        default: false
+      zram_extra_algos:
+        description: "自定义 ZRAM 算法（逗号分隔，如 lzo,lz4,deflate,zstd；仅在未启用完整算法时生效）"
+        required: false
+        type: string
+        default: ""
+
+      # ==================== KPM 扩展选项 ====================
+      kpm_password:
+        description: "自定义 KPM 超级密码（留空=使用默认密码）"
+        required: false
+        type: string
+        default: ""
+
 jobs:
   build-custom-kernel:
     name: "${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.android_version }}-${{ inputs.os_patch_level }}"
@@ -131,6 +150,9 @@ jobs:
       use_rekernel: ${{ inputs.use_rekernel || false }}
       supp_op: ${{ inputs.supp_op || false }}
       enable_susfs: ${{ !inputs.cancel_susfs }}
+      zram_full_algo: ${{ inputs.zram_full_algo || false }}
+      zram_extra_algos: ${{ inputs.zram_extra_algos || '' }}
+      kpm_password: ${{ inputs.kpm_password || '' }}
 
   get-ksu-manager:
     uses: ./.github/workflows/get-manager.yml
