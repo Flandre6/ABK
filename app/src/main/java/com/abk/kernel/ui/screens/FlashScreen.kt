@@ -1,8 +1,6 @@
 package com.abk.kernel.ui.screens
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,9 +46,7 @@ fun FlashScreen(vm: MainViewModel) {
                         showFlashConfirm = false
                         val result = when (item.type) {
                             ArtifactType.KERNEL_IMG -> RootUtils.flashImage(item.filePath, "boot")
-                            ArtifactType.ANYKERNEL3 -> RootUtils.installModule(item.filePath)
-                            ArtifactType.KSU_MANAGER, ArtifactType.SUSFS_MODULE ->
-                                RootUtils.installModule(item.filePath)
+                            ArtifactType.SUSFS_MODULE -> RootUtils.installModule(item.filePath)
                             else -> RootUtils.ShellResult(false, listOf("不支持此文件类型的自动刷写"))
                         }
                         flashLog = result.output
@@ -111,7 +107,9 @@ fun FlashScreen(vm: MainViewModel) {
                     ArtifactDownloadCard(
                         artifact = artifact,
                         progress = state.downloadProgress[artifact.id],
-                        alreadyDownloaded = state.downloadedArtifacts.any { it.id == artifact.id },
+                        alreadyDownloaded = state.downloadedArtifacts.any {
+                            it.filePath.contains("/${artifact.name}/")
+                        },
                         onDownload = { vm.downloadArtifact(artifact) }
                     )
                 }
@@ -134,7 +132,7 @@ fun FlashScreen(vm: MainViewModel) {
             if (state.downloadedArtifacts.isNotEmpty()) {
                 item {
                     Text(
-                        "已下载 — 选择操作",
+                        "已下载，选择操作",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -260,7 +258,7 @@ private fun DownloadedArtifactCard(
                     Text("查看文件")
                 }
                 when (artifact.type) {
-                    ArtifactType.KERNEL_IMG, ArtifactType.ANYKERNEL3 -> Button(
+                    ArtifactType.KERNEL_IMG -> Button(
                         onClick = onFlash,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -269,18 +267,21 @@ private fun DownloadedArtifactCard(
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.flash_kernel))
                     }
+                    ArtifactType.ANYKERNEL3 -> Button(
+                        onClick = { DownloadUtils.openFile(context, artifact.filePath) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("交给恢复刷入")
+                    }
                     ArtifactType.KSU_MANAGER -> Button(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("file://${artifact.filePath}")).apply {
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            runCatching { context.startActivity(intent) }
-                        },
+                        onClick = { DownloadUtils.installApk(context, artifact.filePath) },
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.InstallMobile, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.install_module))
+                        Text("安装 APK")
                     }
                     ArtifactType.SUSFS_MODULE -> Button(
                         onClick = onFlash,

@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.abk.kernel.R
 import com.abk.kernel.viewmodel.AuthStep
 import com.abk.kernel.viewmodel.MainViewModel
@@ -133,6 +134,30 @@ private fun LoginScreen(
     onClearError: () -> Unit
 ) {
     val context = LocalContext.current
+    var showConsentDialog by remember { mutableStateOf(false) }
+
+    if (showConsentDialog) {
+        AlertDialog(
+            onDismissRequest = { showConsentDialog = false },
+            icon = { Icon(Icons.Default.VerifiedUser, null) },
+            title = { Text("授权 GitHub 访问") },
+            text = {
+                Text("ABK 将请求 repo 与 workflow 权限，用于检查/同步您的 fork，并触发内核构建工作流。")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showConsentDialog = false
+                    onLogin()
+                }) { Text(stringResource(R.string.confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConsentDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     Scaffold { padding ->
         Box(
             Modifier.fillMaxSize().padding(padding),
@@ -146,7 +171,7 @@ private fun LoginScreen(
                     .verticalScroll(rememberScrollState())
             ) {
                 Icon(
-                    Icons.Default.GitHub,
+                    Icons.Default.Code,
                     contentDescription = null,
                     modifier = Modifier.size(72.dp),
                     tint = MaterialTheme.colorScheme.primary
@@ -205,7 +230,7 @@ private fun LoginScreen(
 
                 if (userCode == null) {
                     Button(
-                        onClick = onLogin,
+                        onClick = { showConsentDialog = true },
                         enabled = !isLoading,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -216,7 +241,7 @@ private fun LoginScreen(
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
-                            Icon(Icons.Default.GitHub, null)
+                            Icon(Icons.Default.Code, null)
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.login_github))
                         }
@@ -288,7 +313,9 @@ private fun DeviceCodeCard(
                     Text(if (copied) stringResource(R.string.copied) else stringResource(R.string.copy))
                 }
                 Button(onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verificationUri)))
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verificationUri)))
+                    }
                 }) {
                     Icon(Icons.Default.OpenInBrowser, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
@@ -403,6 +430,3 @@ private fun ForkCheckScreen(
         }
     }
 }
-
-// Extension to use sp in Compose
-private val Int.sp get() = this.toFloat().let { androidx.compose.ui.unit.TextUnit(it, androidx.compose.ui.unit.TextUnitType.Sp) }

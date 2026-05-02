@@ -1,5 +1,6 @@
 package com.abk.kernel.data.repository
 
+import com.abk.kernel.BuildConfig
 import com.abk.kernel.data.api.GitHubApiService
 import com.abk.kernel.data.api.GitHubAuthService
 import com.abk.kernel.data.api.NetworkClient
@@ -15,7 +16,7 @@ class GitHubRepository(
     private val authService: GitHubAuthService = NetworkClient.createAuthService(),
     private var apiService: GitHubApiService? = null
 ) {
-    private val clientId = "Ov23lixxxxxxxxxxxxxxxx" // Replace with real OAuth App client_id
+    private val clientId = BuildConfig.GITHUB_CLIENT_ID
 
     fun updateToken(token: String) {
         apiService = NetworkClient.createApiService(token)
@@ -58,8 +59,12 @@ class GitHubRepository(
         val api = apiService ?: return Result.Error("Not authenticated")
         return runCatching {
             val resp = api.getRepo(username, sourceRepo)
+            val repo = resp.body()
+            val expectedParent = "$sourceOwner/$sourceRepo"
             when {
-                resp.isSuccessful && resp.body()?.fork == true -> Result.Success(resp.body())
+                resp.isSuccessful && repo?.fork == true &&
+                    (repo.parent == null || repo.parent.fullName == expectedParent) -> Result.Success(repo)
+                resp.isSuccessful -> Result.Success(null)
                 resp.code() == 404 -> Result.Success(null)
                 else -> Result.Error("Failed to check fork: ${resp.code()}", resp.code())
             }
@@ -75,10 +80,20 @@ class GitHubRepository(
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }
     }
 
-    suspend fun checkBehind(owner: String, repo: String, base: String, head: String): Result<CompareResult> {
+    suspend fun checkBehind(
+        sourceOwner: String,
+        sourceRepo: String,
+        baseBranch: String,
+        headOwner: String,
+        headBranch: String
+    ): Result<CompareResult> {
         val api = apiService ?: return Result.Error("Not authenticated")
         return runCatching {
-            val resp = api.compareCommits(owner, repo, base, head)
+            val resp = api.compareCommits(
+                sourceOwner,
+                sourceRepo,
+                "$baseBranch...$headOwner:$headBranch"
+            )
             if (resp.isSuccessful && resp.body() != null) Result.Success(resp.body()!!)
             else Result.Error("Compare failed: ${resp.code()}", resp.code())
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }
@@ -122,10 +137,29 @@ class GitHubRepository(
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }
     }
 
-    suspend fun listRecentRuns(owner: String, repo: String, perPage: Int = 10): Result<List<WorkflowRun>> {
+    suspend fun enableWorkflow(owner: String, repo: String, workflowId: Long): Result<Unit> {
         val api = apiService ?: return Result.Error("Not authenticated")
         return runCatching {
-            val resp = api.listWorkflowRuns(owner, repo, perPage = perPage)
+            val resp = api.enableWorkflow(owner, repo, workflowId.toString())
+            if (resp.isSuccessful) Result.Success(Unit)
+            else Result.Error("Enable workflow failed: ${resp.code()}", resp.code())
+        }.getOrElse { Result.Error(it.message ?: "Unknown error") }
+    }
+
+    suspend fun listRecentRuns(
+        owner: String,
+        repo: String,
+        perPage: Int = 10,
+        workflowId: Long? = null
+    ): Result<List<WorkflowRun>> {
+        val api = apiService ?: return Result.Error("Not authenticated")
+        return runCatching {
+            val resp = api.listWorkflowRuns(
+                owner,
+                repo,
+                workflowId = workflowId?.toString(),
+                perPage = perPage
+            )
             if (resp.isSuccessful) Result.Success(resp.body()?.workflowRuns ?: emptyList())
             else Result.Error("List runs failed: ${resp.code()}", resp.code())
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }

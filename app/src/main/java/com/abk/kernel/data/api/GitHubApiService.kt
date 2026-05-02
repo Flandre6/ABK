@@ -25,12 +25,11 @@ interface GitHubApiService {
         @Body body: ForkRequest = ForkRequest()
     ): Response<GitHubRepo>
 
-    @GET("repos/{owner}/{repo}/compare/{base}...{head}")
+    @GET("repos/{owner}/{repo}/compare/{basehead}")
     suspend fun compareCommits(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
-        @Path("base") base: String,
-        @Path("head") head: String
+        @Path("basehead") baseHead: String
     ): Response<CompareResult>
 
     // Sync fork (merge upstream into fork)
@@ -54,6 +53,13 @@ interface GitHubApiService {
         @Path("repo") repo: String,
         @Path("workflow_id") workflowId: String,
         @Body body: WorkflowDispatchRequest
+    ): Response<Unit>
+
+    @PUT("repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable")
+    suspend fun enableWorkflow(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("workflow_id") workflowId: String
     ): Response<Unit>
 
     @GET("repos/{owner}/{repo}/actions/runs")

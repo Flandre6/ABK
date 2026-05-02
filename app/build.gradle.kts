@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val githubClientId = providers.gradleProperty("ABK_GITHUB_CLIENT_ID")
+    .orElse(providers.environmentVariable("ABK_GITHUB_CLIENT_ID"))
+    .orElse("Ov23li8skGo6AFPBeSTh")
+
 android {
     namespace = "com.abk.kernel"
     compileSdk = 35
@@ -18,7 +22,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "GITHUB_CLIENT_ID", "\"Ov23lixxxxxxxxxxxxxxxx\"")
+        buildConfigField("String", "GITHUB_CLIENT_ID", "\"${githubClientId.get()}\"")
         buildConfigField("String", "SOURCE_REPO_OWNER", "\"xingguangcuican6666\"")
         buildConfigField("String", "SOURCE_REPO_NAME", "\"GKI_KernelSU_SUSFS\"")
     }
@@ -44,11 +48,6 @@ android {
         compose = true
         buildConfig = true
     }
-}
-
-// libsu requires JitPack; add it only for app module without affecting root
-repositories {
-    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {

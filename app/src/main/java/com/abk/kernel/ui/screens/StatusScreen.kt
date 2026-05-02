@@ -1,5 +1,7 @@
 package com.abk.kernel.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,11 +11,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.abk.kernel.BuildConfig
 import com.abk.kernel.R
 import com.abk.kernel.data.model.BuildStatus
 import com.abk.kernel.data.model.WorkflowRun
@@ -23,6 +25,7 @@ import com.abk.kernel.viewmodel.MainViewModel
 @Composable
 fun StatusScreen(vm: MainViewModel) {
     val state by vm.uiState.collectAsState()
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) { vm.loadRecentRuns() }
 
@@ -121,7 +124,13 @@ fun StatusScreen(vm: MainViewModel) {
                 state.currentRun?.let { run ->
                     Spacer(Modifier.height(4.dp))
                     TextButton(
-                        onClick = {},
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(run.htmlUrl))
+                                )
+                            }
+                        },
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Icon(Icons.Default.OpenInBrowser, null, modifier = Modifier.size(16.dp))
@@ -135,9 +144,10 @@ fun StatusScreen(vm: MainViewModel) {
             if (state.recentRuns.isNotEmpty()) {
                 StatusCard(title = "最近构建记录") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        state.recentRuns.take(5).forEach { run ->
+                        val visibleRuns = state.recentRuns.take(5)
+                        visibleRuns.forEachIndexed { index, run ->
                             RunListItem(run)
-                            if (run != state.recentRuns.last()) {
+                            if (index != visibleRuns.lastIndex) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
                         }

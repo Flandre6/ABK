@@ -1,12 +1,17 @@
 package com.abk.kernel.utils
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.abk.kernel.MainActivity
 import com.abk.kernel.R
 
@@ -45,7 +50,7 @@ object NotificationUtils {
             .setOngoing(true)
             .setContentIntent(pi)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIF_ID_BUILD, notif)
+        post(context, NOTIF_ID_BUILD, notif)
     }
 
     fun notifyBuildDone(context: Context, success: Boolean) {
@@ -64,7 +69,7 @@ object NotificationUtils {
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIF_ID_BUILD, notif)
+        post(context, NOTIF_ID_BUILD, notif)
     }
 
     fun notifyDownloadProgress(context: Context, progress: Int, fileName: String) {
@@ -75,7 +80,7 @@ object NotificationUtils {
             .setProgress(100, progress, progress == 0)
             .setOngoing(true)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIF_ID_DOWNLOAD, notif)
+        post(context, NOTIF_ID_DOWNLOAD, notif)
     }
 
     fun notifyDownloadDone(context: Context, fileName: String) {
@@ -85,10 +90,29 @@ object NotificationUtils {
             .setContentText(fileName)
             .setAutoCancel(true)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIF_ID_DOWNLOAD, notif)
+        post(context, NOTIF_ID_DOWNLOAD, notif)
     }
 
     fun cancelBuildNotification(context: Context) {
         NotificationManagerCompat.from(context).cancel(NOTIF_ID_BUILD)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun post(context: Context, id: Int, notification: android.app.Notification) {
+        if (!canPostNotifications(context)) return
+        runCatching {
+            NotificationManagerCompat.from(context).notify(id, notification)
+        }
+    }
+
+    private fun canPostNotifications(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }
     }
 }

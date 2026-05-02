@@ -5,7 +5,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
-import com.abk.kernel.data.model.BuildStatus
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.abk.kernel.data.model.WorkflowRun
 import com.abk.kernel.data.repository.GitHubRepository
 import com.abk.kernel.data.repository.PreferencesRepository
@@ -34,7 +35,7 @@ class BuildMonitorService : Service() {
                 putExtra(EXTRA_REPO, repo)
                 putExtra(EXTRA_RUN_ID, runId)
             }
-            context.startForegroundService(intent)
+            ContextCompat.startForegroundService(context, intent)
         }
 
         fun stopMonitoring(context: Context) {
@@ -55,6 +56,7 @@ class BuildMonitorService : Service() {
                 val runId = intent.getLongExtra(EXTRA_RUN_ID, -1L)
                 val owner = intent.getStringExtra(EXTRA_OWNER) ?: return START_NOT_STICKY
                 val repo = intent.getStringExtra(EXTRA_REPO) ?: return START_NOT_STICKY
+                if (runId <= 0L) return START_NOT_STICKY
                 startForeground(NotificationUtils.NOTIF_ID_BUILD, buildForegroundNotification())
                 startMonitoring(owner, repo, runId)
             }
@@ -65,7 +67,7 @@ class BuildMonitorService : Service() {
 
     private fun buildForegroundNotification(): Notification {
         NotificationUtils.createChannels(this)
-        return android.app.NotificationCompat.Builder(this, NotificationUtils.CHANNEL_BUILD)
+        return NotificationCompat.Builder(this, NotificationUtils.CHANNEL_BUILD)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setContentTitle(getString(com.abk.kernel.R.string.notif_build_running))
             .setOngoing(true)
@@ -76,11 +78,16 @@ class BuildMonitorService : Service() {
         monitorJob?.cancel()
         monitorJob = scope.launch {
             val prefs = PreferencesRepository(applicationContext)
-            val token = prefs.accessToken.first() ?: return@launch
+            val token = prefs.accessToken.first()
+            if (token.isNullOrBlank()) {
+                stopSelf()
+                return@launch
+            }
+            val notifyBuild = prefs.notifyBuild.first()
             val github = GitHubRepository()
             github.updateToken(token)
 
-            NotificationUtils.notifyBuildRunning(applicationContext)
+            if (notifyBuild) NotificationUtils.notifyBuildRunning(applicationContext)
 
             while (isActive) {
                 val result = github.getWorkflowRun(owner, repo, runId)
@@ -90,7 +97,7 @@ class BuildMonitorService : Service() {
                     when (run.status) {
                         "completed" -> {
                             val success = run.conclusion == "success"
-                            NotificationUtils.notifyBuildDone(applicationContext, success)
+                            if (notifyBuild) NotificationUtils.notifyBuildDone(applicationContext, success)
                             stopSelf()
                             break
                         }

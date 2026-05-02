@@ -76,7 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _uiState.update { it.copy(buildStatus = bs, currentRun = run) }
                 if (bs == BuildStatus.SUCCESS && _uiState.value.autoDownload) {
-                    loadArtifacts(run.id)
+                    loadArtifacts(run.id, autoDownload = true)
                 }
             } catch (_: Exception) {}
         }
@@ -100,6 +100,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }.collect { (token, name, avatar, autoDl, notify) ->
                 if (!token.isNullOrBlank()) {
                     github.updateToken(token)
+                    val shouldResumeSetup = _uiState.value.rootGranted &&
+                        !_uiState.value.isPollingToken &&
+                        _uiState.value.authStep in setOf(AuthStep.CHECK_ROOT, AuthStep.LOGIN)
                     _uiState.update {
                         it.copy(
                             isLoggedIn = true,
@@ -113,6 +116,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 user = state.user?.copy(login = name, avatarUrl = avatar ?: "")
                                     ?: GitHubUser(name, 0, name, avatar ?: "", "")
                             )
+                        }
+                    }
+                    if (shouldResumeSetup) {
+                        if (name.isNullOrBlank()) {
+                            fetchUserAndContinue()
+                        } else {
+                            advanceStep()
                         }
                     }
                 } else {
@@ -167,6 +177,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when {
             !state.rootGranted -> _uiState.update { it.copy(authStep = AuthStep.CHECK_ROOT) }
             !state.isLoggedIn -> _uiState.update { it.copy(authStep = AuthStep.LOGIN) }
+            state.user == null -> {
+                _uiState.update { it.copy(authStep = AuthStep.LOGIN) }
+                viewModelScope.launch { fetchUserAndContinue() }
+            }
             else -> {
                 _uiState.update { it.copy(authStep = AuthStep.FORK_CHECK) }
                 checkFork()
@@ -275,10 +289,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update { it.copy(isLoading = false, forkRepo = null) }
                     } else {
                         val fork = forkResult.data
+                        val upstreamBranch = fork.parent?.defaultBranch ?: fork.defaultBranch
                         prefs.saveForkRepoName(fork.name)
                         val compareResult = github.checkBehind(
-                            username, fork.name,
-                            "${BuildConfig.SOURCE_REPO_OWNER}:${fork.defaultBranch}",
+                            BuildConfig.SOURCE_REPO_OWNER,
+                            BuildConfig.SOURCE_REPO_NAME,
+                            upstreamBranch,
+                            username,
                             fork.defaultBranch
                         )
                         val behind = if (compareResult is Result.Success) compareResult.data.behindBy else 0
@@ -347,6 +364,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val state = _uiState.value
         val username = state.user?.login ?: return
         val repoName = state.forkRepo?.name ?: BuildConfig.SOURCE_REPO_NAME
+        val ref = state.forkRepo?.defaultBranch ?: "main"
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             val wfResult = github.getWorkflowId(username, repoName, "kernel-custom.yml")
@@ -355,14 +373,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val wfId = (wfResult as Result.Success).data
+            github.enableWorkflow(username, repoName, wfId)
+            val previousRunId = when (val prior = github.listRecentRuns(username, repoName, 1, wfId)) {
+                is Result.Success -> prior.data.firstOrNull()?.id
+                else -> null
+            }
             val inputs = config.toInputMap()
-            when (val r = github.dispatchWorkflow(username, repoName, wfId, inputs)) {
+            when (val r = github.dispatchWorkflow(username, repoName, wfId, inputs, ref)) {
                 is Result.Success -> {
                     _uiState.update {
                         it.copy(isLoading = false, buildStatus = BuildStatus.QUEUED)
                     }
                     delay(5000) // wait for GH to create the run
-                    findAndMonitorLatestRun(username, repoName)
+                    findAndMonitorLatestRun(username, repoName, wfId, previousRunId)
                 }
                 is Result.Error -> _uiState.update { it.copy(isLoading = false, error = r.message) }
                 else -> {}
@@ -370,17 +393,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun findAndMonitorLatestRun(owner: String, repo: String) {
-        when (val r = github.listRecentRuns(owner, repo, 5)) {
-            is Result.Success -> {
-                val run = r.data.firstOrNull()
-                if (run != null) {
-                    prefs.saveLastRunId(run.id)
-                    _uiState.update { it.copy(currentRun = run, buildStatus = BuildStatus.QUEUED) }
-                    BuildMonitorService.startMonitoring(getApplication(), owner, repo, run.id)
+    private suspend fun findAndMonitorLatestRun(
+        owner: String,
+        repo: String,
+        workflowId: Long,
+        previousRunId: Long?
+    ) {
+        repeat(6) { attempt ->
+            when (val r = github.listRecentRuns(owner, repo, 5, workflowId)) {
+                is Result.Success -> {
+                    val run = r.data.firstOrNull {
+                        previousRunId == null || it.id > previousRunId
+                    }
+                    if (run != null) {
+                        prefs.saveLastRunId(run.id)
+                        _uiState.update { it.copy(currentRun = run, buildStatus = BuildStatus.QUEUED) }
+                        BuildMonitorService.startMonitoring(getApplication(), owner, repo, run.id)
+                        return
+                    }
                 }
+                else -> {}
             }
-            else -> {}
+            if (attempt < 5) delay(5_000)
+        }
+        _uiState.update {
+            it.copy(error = "已提交构建，但暂未找到工作流运行，请稍后刷新最近构建。")
         }
     }
 
@@ -396,13 +433,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadArtifacts(runId: Long) {
+    fun loadArtifacts(runId: Long, autoDownload: Boolean = false) {
         val state = _uiState.value
         val username = state.user?.login ?: return
         val repoName = state.forkRepo?.name ?: return
         viewModelScope.launch {
             when (val r = github.listArtifacts(username, repoName, runId)) {
-                is Result.Success -> _uiState.update { it.copy(artifacts = r.data) }
+                is Result.Success -> {
+                    _uiState.update { it.copy(artifacts = r.data) }
+                    if (autoDownload) {
+                        r.data.filterNot { it.expired }.forEach { downloadArtifact(it) }
+                    }
+                }
                 else -> {}
             }
         }
@@ -410,10 +452,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadArtifact(artifact: com.abk.kernel.data.model.Artifact) {
         viewModelScope.launch {
-            val token = prefs.accessToken.first() ?: return@launch
+            val token = prefs.accessToken.first()
+            if (token.isNullOrBlank()) {
+                _uiState.update { it.copy(isDownloading = false, error = "未登录，无法下载构建产物") }
+                return@launch
+            }
             _uiState.update { it.copy(isDownloading = true) }
             NotificationUtils.notifyDownloadProgress(getApplication(), 0, artifact.name)
-            val result = DownloadUtils.downloadArtifact(
+            val results = DownloadUtils.downloadArtifact(
                 getApplication(), token, artifact
             ) { pct ->
                 NotificationUtils.notifyDownloadProgress(getApplication(), pct, artifact.name)
@@ -421,12 +467,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     s.copy(downloadProgress = s.downloadProgress + (artifact.id to pct))
                 }
             }
-            if (result != null) {
+            if (results.isNotEmpty()) {
                 NotificationUtils.notifyDownloadDone(getApplication(), artifact.name)
                 _uiState.update { s ->
                     s.copy(
                         isDownloading = false,
-                        downloadedArtifacts = s.downloadedArtifacts + result,
+                        downloadedArtifacts = (s.downloadedArtifacts + results)
+                            .distinctBy { it.filePath },
                         downloadProgress = s.downloadProgress - artifact.id
                     )
                 }

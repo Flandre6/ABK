@@ -1,5 +1,6 @@
 package com.abk.kernel.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,7 +10,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,7 +23,6 @@ import com.abk.kernel.viewmodel.MainViewModel
 fun SettingsScreen(vm: MainViewModel) {
     val state by vm.uiState.collectAsState()
     var showLogoutDialog by remember { mutableStateOf(false) }
-    val context = LocalContext.current
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -137,9 +136,7 @@ fun SettingsScreen(vm: MainViewModel) {
                                 onClick = { vm.setThemeMode(key) }
                             )
                         },
-                        modifier = Modifier.then(
-                            Modifier // clickable
-                        )
+                        modifier = Modifier.clickable { vm.setThemeMode(key) }
                     )
                     if (key != themes.last().first) HorizontalDivider()
                 }
@@ -158,7 +155,7 @@ fun SettingsScreen(vm: MainViewModel) {
                     supportingContent = {
                         Text("${BuildConfig.SOURCE_REPO_OWNER}/${BuildConfig.SOURCE_REPO_NAME}")
                     },
-                    leadingContent = { Icon(Icons.Default.GitHub, null) }
+                    leadingContent = { Icon(Icons.Default.Code, null) }
                 )
             }
 

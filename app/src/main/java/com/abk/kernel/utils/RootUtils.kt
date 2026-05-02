@@ -27,7 +27,7 @@ object RootUtils {
     }
 
     fun flashImage(imagePath: String, partition: String): ShellResult {
-        val result = Shell.cmd("dd if=\"$imagePath\" of=/dev/block/by-name/$partition").exec()
+        val result = Shell.cmd("dd if=\"$imagePath\" of=/dev/block/by-name/$partition", "sync").exec()
         return ShellResult(result.isSuccess, result.out + result.err)
     }
 
