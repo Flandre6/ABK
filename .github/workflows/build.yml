@@ -910,9 +910,11 @@ jobs:
 
       - name: 配置 KPM 超级密码
         if: inputs.use_kpm && inputs.kpm_password != '' && (inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'ReSukiSU' || inputs.ksu_variant == 'Next')
+        env:
+          KPM_PASSWORD: ${{ inputs.kpm_password }}
         run: |
           echo "设置自定义 KPM 超级密码..."
-          echo 'CONFIG_KPM_SUPER_KEY="${{ inputs.kpm_password }}"' >> "$DEFCONFIG"
+          echo "CONFIG_KPM_SUPER_KEY=\"${KPM_PASSWORD}\"" >> "$DEFCONFIG"
           echo "KPM 超级密码已写入 defconfig"
 
       - name: 添加 SUSFS 配置
