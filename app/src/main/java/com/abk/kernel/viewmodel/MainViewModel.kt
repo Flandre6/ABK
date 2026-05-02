@@ -14,6 +14,7 @@ import com.abk.kernel.data.repository.GitHubRepository
 import com.abk.kernel.data.repository.PreferencesRepository
 import com.abk.kernel.data.repository.Result
 import com.abk.kernel.utils.BuildMonitorService
+import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.NotificationUtils
 import com.abk.kernel.utils.RootUtils
 import kotlinx.coroutines.delay

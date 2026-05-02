@@ -153,15 +153,19 @@ class GitHubRepository(
         workflowId: Long? = null
     ): Result<List<WorkflowRun>> {
         val api = apiService ?: return Result.Error("Not authenticated")
-        return runCatching {
+        return runCatching<Result<List<WorkflowRun>>> {
             val resp = api.listWorkflowRuns(
                 owner,
                 repo,
                 workflowId = workflowId?.toString(),
                 perPage = perPage
             )
-            if (resp.isSuccessful) Result.Success(resp.body()?.workflowRuns ?: emptyList())
-            else Result.Error("List runs failed: ${resp.code()}", resp.code())
+            if (resp.isSuccessful) {
+                val runs: List<WorkflowRun> = resp.body()?.workflowRuns.orEmpty()
+                Result.Success(runs)
+            } else {
+                Result.Error("List runs failed: ${resp.code()}", resp.code())
+            }
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }
     }
 
@@ -176,10 +180,14 @@ class GitHubRepository(
 
     suspend fun listArtifacts(owner: String, repo: String, runId: Long): Result<List<Artifact>> {
         val api = apiService ?: return Result.Error("Not authenticated")
-        return runCatching {
+        return runCatching<Result<List<Artifact>>> {
             val resp = api.listArtifacts(owner, repo, runId)
-            if (resp.isSuccessful) Result.Success(resp.body()?.artifacts ?: emptyList())
-            else Result.Error("List artifacts failed: ${resp.code()}", resp.code())
+            if (resp.isSuccessful) {
+                val artifacts: List<Artifact> = resp.body()?.artifacts.orEmpty()
+                Result.Success(artifacts)
+            } else {
+                Result.Error("List artifacts failed: ${resp.code()}", resp.code())
+            }
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }
     }
 }
