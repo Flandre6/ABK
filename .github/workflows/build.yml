@@ -67,6 +67,22 @@ on:
         type: boolean
         default: false
 
+      # ==================== ZRAM 扩展选项 ====================
+      zram_full_algo:
+        required: false
+        type: boolean
+        default: false
+      zram_extra_algos:
+        required: false
+        type: string
+        default: ""
+
+      # ==================== KPM 扩展选项 ====================
+      kpm_password:
+        required: false
+        type: string
+        default: ""
+
 jobs:
   build-kernel:
     name: "${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.android_version }}-${{ inputs.os_patch_level }}-${{ inputs.ksu_variant }}"
@@ -93,8 +109,11 @@ jobs:
           echo "构建时间      : ${{ inputs.build_time }}"
           echo "SUSFS 状态    : ${{ inputs.enable_susfs }}"
           echo "ZRAM 增强     : ${{ inputs.use_zram }}"
+          echo "ZRAM 完整算法 : ${{ inputs.zram_full_algo }}"
+          echo "ZRAM 额外算法 : ${{ inputs.zram_extra_algos || '无' }}"
           echo "BBG 补丁      : ${{ inputs.use_bbg }}"
           echo "KPM 功能      : ${{ inputs.use_kpm }}"
+          echo "KPM 密码      : ${{ inputs.kpm_password && '已自定义' || '默认' }}"
           echo "Re-Kernel     : ${{ inputs.use_rekernel }}"
           echo "Stock Config  : 自动检测 config/stock_defconfig"
           echo "========================================"
@@ -774,6 +793,38 @@ jobs:
             cat "$ZZH_PATCHES/config/zram.config" >> "$CONFIG_FILE"
           fi
 
+          # ---- ZRAM 完整算法支持 ----
+          if [ "${{ inputs.zram_full_algo }}" = "true" ]; then
+            echo "启用 ZRAM 完整算法支持..."
+            cat >> "$CONFIG_FILE" <<'EOF'
+          CONFIG_CRYPTO_LZO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_DEFLATE=y
+          CONFIG_CRYPTO_ZSTD=y
+          CONFIG_ZRAM_DEF_COMP_LZORLE=y
+          CONFIG_ZRAM_DEF_COMP="lzo-rle"
+          EOF
+          elif [ -n "${{ inputs.zram_extra_algos }}" ]; then
+            # ---- 自定义单独算法 ----
+            echo "添加自定义 ZRAM 算法: ${{ inputs.zram_extra_algos }}"
+            IFS=',' read -ra ALGOS <<< "${{ inputs.zram_extra_algos }}"
+            for raw_algo in "${ALGOS[@]}"; do
+              algo=$(echo "$raw_algo" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+              case "$algo" in
+                "lzo")        echo "CONFIG_CRYPTO_LZO=y"        >> "$CONFIG_FILE" ;;
+                "lz4")        echo "CONFIG_CRYPTO_LZ4=y"        >> "$CONFIG_FILE" ;;
+                "lz4hc")      echo "CONFIG_CRYPTO_LZ4HC=y"      >> "$CONFIG_FILE" ;;
+                "lz4k")       echo "CONFIG_CRYPTO_LZ4K=y"       >> "$CONFIG_FILE" ;;
+                "lz4k_oplus") echo "CONFIG_CRYPTO_LZ4K_OPLUS=y" >> "$CONFIG_FILE" ;;
+                "lz4kd")      echo "CONFIG_CRYPTO_LZ4KD=y"      >> "$CONFIG_FILE" ;;
+                "deflate")    echo "CONFIG_CRYPTO_DEFLATE=y"    >> "$CONFIG_FILE" ;;
+                "842")        echo "CONFIG_CRYPTO_842=y"        >> "$CONFIG_FILE" ;;
+                "zstd")       echo "CONFIG_CRYPTO_ZSTD=y"       >> "$CONFIG_FILE" ;;
+                *) echo "::warning::未知的 ZRAM 算法: $raw_algo，跳过" ;;
+              esac
+            done
+          fi
+
       - name: 添加 BBG 防格机补丁
         if: inputs.use_bbg
         working-directory: ${{ env.KERNEL_ROOT }}
@@ -856,6 +907,13 @@ jobs:
           fi
 
           sed -i 's/check_defconfig//' ./common/build.config.gki
+
+      - name: 配置 KPM 超级密码
+        if: inputs.use_kpm && inputs.kpm_password != '' && (inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'ReSukiSU' || inputs.ksu_variant == 'Next')
+        run: |
+          echo "设置自定义 KPM 超级密码..."
+          echo 'CONFIG_KPM_SUPER_KEY="${{ inputs.kpm_password }}"' >> "$DEFCONFIG"
+          echo "KPM 超级密码已写入 defconfig"
 
       - name: 添加 SUSFS 配置
         if: inputs.enable_susfs
