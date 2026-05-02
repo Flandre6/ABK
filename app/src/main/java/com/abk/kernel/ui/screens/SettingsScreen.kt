@@ -44,8 +44,14 @@ fun SettingsScreen(vm: MainViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+            LargeTopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.settings_title),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }

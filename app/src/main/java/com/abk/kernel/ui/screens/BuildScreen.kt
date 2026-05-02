@@ -1,6 +1,13 @@
 package com.abk.kernel.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,6 +21,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.abk.kernel.R
+import com.abk.kernel.data.model.BuildProgress
+import com.abk.kernel.data.model.BuildStepProgress
 import com.abk.kernel.data.model.BuildStatus
 import com.abk.kernel.data.model.KernelBuildConfig
 import com.abk.kernel.viewmodel.MainViewModel
@@ -22,7 +31,8 @@ import com.abk.kernel.viewmodel.MainViewModel
 @Composable
 fun BuildScreen(vm: MainViewModel) {
     val state by vm.uiState.collectAsState()
-    var config by remember { mutableStateOf(KernelBuildConfig()) }
+    val config = state.buildConfig
+    val recommended = state.recommendedBuildConfig
     var showConfirmDialog by remember { mutableStateOf(false) }
 
     if (showConfirmDialog) {
@@ -53,8 +63,14 @@ fun BuildScreen(vm: MainViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.build_title)) },
+            LargeTopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.build_title),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
@@ -67,9 +83,15 @@ fun BuildScreen(vm: MainViewModel) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Build status banner
-            if (state.buildStatus != BuildStatus.IDLE) {
-                BuildStatusBanner(state.buildStatus)
+            AnimatedVisibility(
+                visible = state.buildStatus != BuildStatus.IDLE,
+                enter = fadeIn() + slideInVertically { -it / 3 } + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    BuildStatusBanner(state.buildStatus, state.buildProgress)
+                    BuildProgressCard(state.buildProgress)
+                }
             }
 
             // ── 内核版本配置 ──────────────────────────────────────────────
@@ -78,26 +100,32 @@ fun BuildScreen(vm: MainViewModel) {
                     label = "Android 版本",
                     value = config.androidVersion,
                     options = listOf("android12", "android13", "android14", "android15", "android16"),
-                    onSelect = { config = config.copy(androidVersion = it) }
+                    recommendedValue = recommended?.androidVersion,
+                    onSelect = { vm.updateBuildConfig(config.copy(androidVersion = it)) }
                 )
                 DropdownField(
                     label = "内核版本",
                     value = config.kernelVersion,
                     options = listOf("5.10", "5.15", "6.1", "6.6", "6.12"),
-                    onSelect = { config = config.copy(kernelVersion = it) }
+                    recommendedValue = recommended?.kernelVersion,
+                    onSelect = { vm.updateBuildConfig(config.copy(kernelVersion = it)) }
                 )
                 OutlinedTextField(
                     value = config.subLevel,
-                    onValueChange = { config = config.copy(subLevel = it) },
-                    label = { Text("子版本号") },
+                    onValueChange = { vm.updateBuildConfig(config.copy(subLevel = it)) },
+                    label = {
+                        Text(recommended?.subLevel?.let { "子版本号（推荐：$it）" } ?: "子版本号")
+                    },
                     placeholder = { Text("如: 66, 198") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
                 OutlinedTextField(
                     value = config.osPatchLevel,
-                    onValueChange = { config = config.copy(osPatchLevel = it) },
-                    label = { Text("安全补丁级别") },
+                    onValueChange = { vm.updateBuildConfig(config.copy(osPatchLevel = it)) },
+                    label = {
+                        Text(recommended?.osPatchLevel?.let { "安全补丁级别（推荐：$it）" } ?: "安全补丁级别")
+                    },
                     placeholder = { Text("如: 2022-01, lts") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
@@ -105,8 +133,10 @@ fun BuildScreen(vm: MainViewModel) {
                 if (config.kernelVersion == "5.10") {
                     OutlinedTextField(
                         value = config.revision,
-                        onValueChange = { config = config.copy(revision = it) },
-                        label = { Text("修订版本 (5.10 专用)") },
+                        onValueChange = { vm.updateBuildConfig(config.copy(revision = it)) },
+                        label = {
+                            Text(recommended?.revision?.let { "修订版本（推荐：$it）" } ?: "修订版本 (5.10 专用)")
+                        },
                         placeholder = { Text("如: r11") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
@@ -120,35 +150,35 @@ fun BuildScreen(vm: MainViewModel) {
                     label = "KernelSU 变体",
                     value = config.kernelsuVariant,
                     options = listOf("Official", "SukiSU", "ReSukiSU"),
-                    onSelect = { config = config.copy(kernelsuVariant = it) }
+                    onSelect = { vm.updateBuildConfig(config.copy(kernelsuVariant = it)) }
                 )
                 DropdownField(
                     label = "KSU 分支",
                     value = config.kernelsuBranch,
                     options = listOf("Stable(标准)", "Dev(开发)", "Other(其他/指定)"),
-                    onSelect = { config = config.copy(kernelsuBranch = it) }
+                    onSelect = { vm.updateBuildConfig(config.copy(kernelsuBranch = it)) }
                 )
             }
 
             // ── 功能开关 ─────────────────────────────────────────────────
             SectionCard(title = "功能开关") {
                 SwitchRow("启用 SUSFS", !config.cancelSusfs) {
-                    config = config.copy(cancelSusfs = !it)
+                    vm.updateBuildConfig(config.copy(cancelSusfs = !it))
                 }
                 SwitchRow("启用 ZRAM 增强算法", config.useZram) {
-                    config = config.copy(useZram = it)
+                    vm.updateBuildConfig(config.copy(useZram = it))
                 }
                 SwitchRow("启用 BBG 防格机", config.useBbg) {
-                    config = config.copy(useBbg = it)
+                    vm.updateBuildConfig(config.copy(useBbg = it))
                 }
                 SwitchRow("启用 KPM 功能", config.useKpm) {
-                    config = config.copy(useKpm = it)
+                    vm.updateBuildConfig(config.copy(useKpm = it))
                 }
                 SwitchRow("启用 Re-Kernel 驱动 (测试)", config.useRekernel) {
-                    config = config.copy(useRekernel = it)
+                    vm.updateBuildConfig(config.copy(useRekernel = it))
                 }
                 SwitchRow("启用一加 8E 支持", config.suppOp) {
-                    config = config.copy(suppOp = it)
+                    vm.updateBuildConfig(config.copy(suppOp = it))
                 }
             }
 
@@ -156,12 +186,12 @@ fun BuildScreen(vm: MainViewModel) {
             AnimatedVisibility(config.useZram) {
                 SectionCard(title = "ZRAM 扩展选项") {
                     SwitchRow("启用完整算法支持 (LZO/LZ4/ZSTD 等)", config.zramFullAlgo) {
-                        config = config.copy(zramFullAlgo = it)
+                        vm.updateBuildConfig(config.copy(zramFullAlgo = it))
                     }
                     if (!config.zramFullAlgo) {
                         OutlinedTextField(
                             value = config.zramExtraAlgos,
-                            onValueChange = { config = config.copy(zramExtraAlgos = it) },
+                            onValueChange = { vm.updateBuildConfig(config.copy(zramExtraAlgos = it)) },
                             label = { Text("自定义 ZRAM 算法") },
                             placeholder = { Text("如: lzo,lz4,deflate,zstd") },
                             modifier = Modifier.fillMaxWidth(),
@@ -176,7 +206,7 @@ fun BuildScreen(vm: MainViewModel) {
                 SectionCard(title = "KPM 扩展选项") {
                     OutlinedTextField(
                         value = config.kpmPassword,
-                        onValueChange = { config = config.copy(kpmPassword = it) },
+                        onValueChange = { vm.updateBuildConfig(config.copy(kpmPassword = it)) },
                         label = { Text("KPM 超级密码 (可选)") },
                         placeholder = { Text("留空使用默认密码") },
                         modifier = Modifier.fillMaxWidth(),
@@ -189,14 +219,14 @@ fun BuildScreen(vm: MainViewModel) {
             SectionCard(title = "可选配置") {
                 OutlinedTextField(
                     value = config.version,
-                    onValueChange = { config = config.copy(version = it) },
+                    onValueChange = { vm.updateBuildConfig(config.copy(version = it)) },
                     label = { Text("自定义版本名 (可选)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
                 OutlinedTextField(
                     value = config.buildTime,
-                    onValueChange = { config = config.copy(buildTime = it) },
+                    onValueChange = { vm.updateBuildConfig(config.copy(buildTime = it)) },
                     label = { Text("自定义构建时间 (可选)") },
                     placeholder = { Text("留空=当前 UTC 时间") },
                     modifier = Modifier.fillMaxWidth(),
@@ -244,7 +274,7 @@ fun BuildScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun BuildStatusBanner(status: BuildStatus) {
+private fun BuildStatusBanner(status: BuildStatus, progress: BuildProgress) {
     val (icon, text, color) = when (status) {
         BuildStatus.QUEUED -> Triple(Icons.Default.Queue, "构建已排队，等待运行…", MaterialTheme.colorScheme.tertiary)
         BuildStatus.IN_PROGRESS -> Triple(Icons.Default.RunCircle, "构建进行中…", MaterialTheme.colorScheme.secondary)
@@ -267,8 +297,83 @@ private fun BuildStatusBanner(status: BuildStatus) {
             } else {
                 Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
             }
-            Text(text, color = color, style = MaterialTheme.typography.bodyMedium)
+            Column(Modifier.weight(1f)) {
+                Text(text, color = color, style = MaterialTheme.typography.bodyMedium)
+                if (progress.totalSteps > 0) {
+                    Text(
+                        "${progress.percent}% · ${progress.currentStep}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun BuildProgressCard(progress: BuildProgress) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = (progress.percent / 100f).coerceIn(0f, 1f),
+        label = "build-progress"
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text("工作流进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("${progress.percent}%", style = MaterialTheme.typography.labelLarge)
+            }
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                progress.currentStep,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 2
+            )
+            AnimatedVisibility(
+                visible = progress.steps.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    progress.steps.take(8).forEach { step ->
+                        BuildStepRow(step)
+                    }
+                    if (progress.steps.size > 8) {
+                        Text(
+                            "还有 ${progress.steps.size - 8} 个步骤在后台跟踪",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BuildStepRow(step: BuildStepProgress) {
+    val (icon, color, label) = when {
+        step.status == "completed" && step.conclusion in listOf("failure", "cancelled", "timed_out") ->
+            Triple(Icons.Default.Error, MaterialTheme.colorScheme.error, "失败")
+        step.status == "completed" ->
+            Triple(Icons.Default.CheckCircle, MaterialTheme.colorScheme.primary, "完成")
+        step.status == "in_progress" ->
+            Triple(Icons.Default.Sync, MaterialTheme.colorScheme.tertiary, "进行中")
+        else -> Triple(Icons.Default.RadioButtonUnchecked, MaterialTheme.colorScheme.outline, "等待")
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+        Text(step.name, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f), maxLines = 1)
+        Text(label, color = color, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -278,7 +383,7 @@ fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             content()
         }
@@ -291,6 +396,7 @@ fun DropdownField(
     label: String,
     value: String,
     options: List<String>,
+    recommendedValue: String? = null,
     onSelect: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -307,8 +413,9 @@ fun DropdownField(
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { opt ->
+                val text = if (opt == recommendedValue) "$opt（推荐）" else opt
                 DropdownMenuItem(
-                    text = { Text(opt) },
+                    text = { Text(text) },
                     onClick = { onSelect(opt); expanded = false },
                     contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
                 )

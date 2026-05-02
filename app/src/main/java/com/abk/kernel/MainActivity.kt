@@ -6,6 +6,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -98,11 +102,17 @@ private fun AbkMainScaffold(vm: MainViewModel) {
         }
     ) { padding ->
         androidx.compose.foundation.layout.Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            when (selectedTab) {
-                AbkTab.Status -> StatusScreen(vm)
-                AbkTab.Build -> BuildScreen(vm)
-                AbkTab.Flash -> FlashScreen(vm)
-                AbkTab.Settings -> SettingsScreen(vm)
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "abk-tab"
+            ) { tab ->
+                when (tab) {
+                    AbkTab.Status -> StatusScreen(vm)
+                    AbkTab.Build -> BuildScreen(vm)
+                    AbkTab.Flash -> FlashScreen(vm)
+                    AbkTab.Settings -> SettingsScreen(vm)
+                }
             }
         }
     }

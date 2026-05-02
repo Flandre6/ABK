@@ -7,6 +7,8 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.abk.kernel.data.model.BuildProgress
+import com.abk.kernel.data.model.WorkflowJob
 import com.abk.kernel.data.model.WorkflowRun
 import com.abk.kernel.data.repository.GitHubRepository
 import com.abk.kernel.data.repository.PreferencesRepository
@@ -27,6 +29,7 @@ class BuildMonitorService : Service() {
         const val BROADCAST_STATUS = "com.abk.kernel.BUILD_STATUS"
         const val EXTRA_STATUS = "status"
         const val EXTRA_RUN = "run_json"
+        const val EXTRA_PROGRESS = "progress_json"
 
         fun startMonitoring(context: Context, owner: String, repo: String, runId: Long) {
             val intent = Intent(context, BuildMonitorService::class.java).apply {
@@ -93,7 +96,19 @@ class BuildMonitorService : Service() {
                 val result = github.getWorkflowRun(owner, repo, runId)
                 if (result is Result.Success) {
                     val run = result.data
-                    broadcastStatus(run)
+                    val jobs: List<WorkflowJob> = when (val jobsResult = github.listRunJobs(owner, repo, runId)) {
+                        is Result.Success -> jobsResult.data
+                        else -> emptyList()
+                    }
+                    val progress = BuildProgressUtils.from(run, jobs)
+                    broadcastStatus(run, progress)
+                    if (notifyBuild && run.status != "completed") {
+                        NotificationUtils.notifyBuildRunning(
+                            applicationContext,
+                            progress.percent,
+                            progress.currentStep
+                        )
+                    }
                     when (run.status) {
                         "completed" -> {
                             val success = run.conclusion == "success"
@@ -116,10 +131,11 @@ class BuildMonitorService : Service() {
         }
     }
 
-    private fun broadcastStatus(run: WorkflowRun) {
+    private fun broadcastStatus(run: WorkflowRun, progress: BuildProgress) {
         val intent = Intent(BROADCAST_STATUS).apply {
             putExtra(EXTRA_STATUS, run.status)
             putExtra(EXTRA_RUN, com.google.gson.Gson().toJson(run))
+            putExtra(EXTRA_PROGRESS, com.google.gson.Gson().toJson(progress))
             setPackage(packageName)
         }
         sendBroadcast(intent)

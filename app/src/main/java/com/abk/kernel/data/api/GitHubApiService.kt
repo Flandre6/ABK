@@ -78,6 +78,14 @@ interface GitHubApiService {
         @Path("run_id") runId: Long
     ): Response<WorkflowRun>
 
+    @GET("repos/{owner}/{repo}/actions/runs/{run_id}/jobs")
+    suspend fun listRunJobs(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("run_id") runId: Long,
+        @Query("per_page") perPage: Int = 100
+    ): Response<WorkflowJobsResponse>
+
     // ── Artifacts ─────────────────────────────────────────────────────────
     @GET("repos/{owner}/{repo}/actions/runs/{run_id}/artifacts")
     suspend fun listArtifacts(

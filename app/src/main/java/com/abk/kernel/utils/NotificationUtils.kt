@@ -40,16 +40,31 @@ object NotificationUtils {
         )
     }
 
-    fun notifyBuildRunning(context: Context) {
+    fun notifyBuildRunning(
+        context: Context,
+        progress: Int? = null,
+        currentStep: String? = null
+    ) {
         val intent = Intent(context, MainActivity::class.java)
         val pi = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-        val notif = NotificationCompat.Builder(context, CHANNEL_BUILD)
+        val text = when {
+            progress != null && !currentStep.isNullOrBlank() -> "$progress% · $currentStep"
+            !currentStep.isNullOrBlank() -> currentStep
+            else -> context.getString(R.string.build_running)
+        }
+        val builder = NotificationCompat.Builder(context, CHANNEL_BUILD)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setContentTitle(context.getString(R.string.notif_build_running))
-            .setContentText(context.getString(R.string.build_running))
+            .setContentText(text)
             .setOngoing(true)
             .setContentIntent(pi)
-            .build()
+            .setOnlyAlertOnce(true)
+        if (progress != null) {
+            builder.setProgress(100, progress.coerceIn(0, 100), false)
+        } else {
+            builder.setProgress(100, 0, true)
+        }
+        val notif = builder.build()
         post(context, NOTIF_ID_BUILD, notif)
     }
 

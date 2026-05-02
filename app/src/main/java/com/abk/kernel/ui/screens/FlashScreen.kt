@@ -80,8 +80,14 @@ fun FlashScreen(vm: MainViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.flash_title)) },
+            LargeTopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.flash_title),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }

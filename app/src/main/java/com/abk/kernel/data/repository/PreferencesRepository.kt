@@ -20,6 +20,7 @@ class PreferencesRepository(private val context: Context) {
         val KEY_NOTIFY_BUILD = booleanPreferencesKey("notify_build")
         val KEY_LAST_RUN_ID = longPreferencesKey("last_run_id")
         val KEY_THEME = stringPreferencesKey("theme_mode") // "system" | "light" | "dark"
+        val KEY_BUILD_CONFIG = stringPreferencesKey("build_config_json")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { it[KEY_ACCESS_TOKEN] }
@@ -30,6 +31,7 @@ class PreferencesRepository(private val context: Context) {
     val notifyBuild: Flow<Boolean> = context.dataStore.data.map { it[KEY_NOTIFY_BUILD] ?: true }
     val lastRunId: Flow<Long> = context.dataStore.data.map { it[KEY_LAST_RUN_ID] ?: -1L }
     val themeMode: Flow<String> = context.dataStore.data.map { it[KEY_THEME] ?: "system" }
+    val buildConfigJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_CONFIG] }
 
     suspend fun saveToken(token: String) = context.dataStore.edit { it[KEY_ACCESS_TOKEN] = token }
     suspend fun saveUsername(name: String) = context.dataStore.edit { it[KEY_USERNAME] = name }
@@ -39,6 +41,7 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setNotifyBuild(v: Boolean) = context.dataStore.edit { it[KEY_NOTIFY_BUILD] = v }
     suspend fun saveLastRunId(id: Long) = context.dataStore.edit { it[KEY_LAST_RUN_ID] = id }
     suspend fun setThemeMode(mode: String) = context.dataStore.edit { it[KEY_THEME] = mode }
+    suspend fun saveBuildConfigJson(json: String) = context.dataStore.edit { it[KEY_BUILD_CONFIG] = json }
 
     suspend fun clearAuth() = context.dataStore.edit {
         it.remove(KEY_ACCESS_TOKEN)

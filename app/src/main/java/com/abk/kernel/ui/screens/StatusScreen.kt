@@ -31,8 +31,14 @@ fun StatusScreen(vm: MainViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.status_title)) },
+            LargeTopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.status_title),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -115,11 +121,23 @@ fun StatusScreen(vm: MainViewModel) {
                     BuildStatus.IN_PROGRESS -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text("构建进行中…")
+                        Text("${state.buildProgress.percent}% · ${state.buildProgress.currentStep}")
                     }
                     BuildStatus.SUCCESS -> StatusRow(Icons.Default.CheckCircle, "最近构建成功 ✓", false)
                     BuildStatus.FAILURE -> StatusRow(Icons.Default.Error, "最近构建失败", true)
                     BuildStatus.CANCELLED -> StatusRow(Icons.Default.Cancel, "构建已取消", true)
+                }
+                if (state.buildProgress.totalSteps > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { state.buildProgress.percent / 100f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        "${state.buildProgress.completedSteps}/${state.buildProgress.totalSteps} 个步骤完成",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 state.currentRun?.let { run ->
                     Spacer(Modifier.height(4.dp))

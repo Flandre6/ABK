@@ -69,6 +69,41 @@ data class WorkflowRunsResponse(
     @SerializedName("workflow_runs") val workflowRuns: List<WorkflowRun>
 )
 
+data class WorkflowJobsResponse(
+    @SerializedName("total_count") val totalCount: Int,
+    val jobs: List<WorkflowJob> = emptyList()
+)
+
+data class WorkflowJob(
+    val id: Long,
+    val name: String,
+    val status: String?,
+    val conclusion: String?,
+    val steps: List<WorkflowStep>? = emptyList()
+)
+
+data class WorkflowStep(
+    val name: String,
+    val status: String?,
+    val conclusion: String?,
+    val number: Int
+)
+
+data class BuildStepProgress(
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+    val index: Int
+)
+
+data class BuildProgress(
+    val percent: Int = 0,
+    val currentStep: String = "等待 GitHub 分配 Runner",
+    val completedSteps: Int = 0,
+    val totalSteps: Int = 0,
+    val steps: List<BuildStepProgress> = emptyList()
+)
+
 data class Artifact(
     val id: Long,
     val name: String,

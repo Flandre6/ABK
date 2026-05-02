@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,6 +18,7 @@ import com.abk.kernel.utils.BuildMonitorService
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.NotificationUtils
 import com.abk.kernel.utils.RootUtils
+import com.google.gson.Gson
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -44,6 +46,9 @@ data class MainUiState(
     val buildStatus: BuildStatus = BuildStatus.IDLE,
     val currentRun: WorkflowRun? = null,
     val recentRuns: List<WorkflowRun> = emptyList(),
+    val buildProgress: BuildProgress = BuildProgress(),
+    val buildConfig: KernelBuildConfig = KernelBuildConfig(),
+    val recommendedBuildConfig: KernelBuildConfig? = null,
     // Download
     val downloadedArtifacts: List<DownloadedArtifact> = emptyList(),
     val artifacts: List<Artifact> = emptyList(),
@@ -59,6 +64,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = PreferencesRepository(application)
     val github = GitHubRepository()
+    private val gson = Gson()
+    private var hasSavedBuildConfig = false
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -69,13 +76,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val runJson = intent.getStringExtra(BuildMonitorService.EXTRA_RUN) ?: return
             try {
                 val run = com.google.gson.Gson().fromJson(runJson, WorkflowRun::class.java)
+                val progress = intent.getStringExtra(BuildMonitorService.EXTRA_PROGRESS)?.let {
+                    runCatching { gson.fromJson(it, BuildProgress::class.java) }.getOrNull()
+                } ?: _uiState.value.buildProgress
                 val bs = when (status) {
                     "queued", "waiting", "requested" -> BuildStatus.QUEUED
                     "in_progress" -> BuildStatus.IN_PROGRESS
                     "completed" -> if (run.conclusion == "success") BuildStatus.SUCCESS else BuildStatus.FAILURE
                     else -> BuildStatus.IDLE
                 }
-                _uiState.update { it.copy(buildStatus = bs, currentRun = run) }
+                _uiState.update { it.copy(buildStatus = bs, currentRun = run, buildProgress = progress) }
                 if (bs == BuildStatus.SUCCESS && _uiState.value.autoDownload) {
                     loadArtifacts(run.id, autoDownload = true)
                 }
@@ -143,6 +153,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(themeMode = mode) }
             }
         }
+        viewModelScope.launch {
+            prefs.buildConfigJson.collect { json ->
+                if (!json.isNullOrBlank()) {
+                    runCatching { gson.fromJson(json, KernelBuildConfig::class.java) }
+                        .getOrNull()
+                        ?.let { config ->
+                            hasSavedBuildConfig = true
+                            _uiState.update { it.copy(buildConfig = config) }
+                        }
+                }
+            }
+        }
     }
 
     private fun registerStatusReceiver() {
@@ -159,7 +181,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun checkRoot() {
         viewModelScope.launch {
             val granted = RootUtils.isRootAvailable()
-            _uiState.update { it.copy(rootGranted = granted) }
+            val recommended = if (granted) detectRecommendedBuildConfig() else null
+            _uiState.update {
+                it.copy(
+                    rootGranted = granted,
+                    recommendedBuildConfig = recommended,
+                    buildConfig = if (granted && !hasSavedBuildConfig && recommended != null) {
+                        recommended
+                    } else {
+                        it.buildConfig
+                    }
+                )
+            }
             if (granted) advanceStep()
         }
     }
@@ -168,7 +201,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val granted = RootUtils.requestRoot()
-            _uiState.update { it.copy(rootGranted = granted, isLoading = false) }
+            val recommended = if (granted) detectRecommendedBuildConfig() else null
+            _uiState.update {
+                it.copy(
+                    rootGranted = granted,
+                    isLoading = false,
+                    recommendedBuildConfig = recommended,
+                    buildConfig = if (granted && !hasSavedBuildConfig && recommended != null) {
+                        recommended
+                    } else {
+                        it.buildConfig
+                    }
+                )
+            }
             if (granted) advanceStep()
         }
     }
@@ -324,6 +369,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is Result.Success -> {
                     prefs.saveForkRepoName(r.data.name)
                     _uiState.update { it.copy(isLoading = false, forkRepo = r.data) }
+                    openActionsPage(r.data)
                     finishSetup()
                 }
                 is Result.Error -> _uiState.update { it.copy(isLoading = false, error = r.message) }
@@ -383,7 +429,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (val r = github.dispatchWorkflow(username, repoName, wfId, inputs, ref)) {
                 is Result.Success -> {
                     _uiState.update {
-                        it.copy(isLoading = false, buildStatus = BuildStatus.QUEUED)
+                        it.copy(
+                            isLoading = false,
+                            buildStatus = BuildStatus.QUEUED,
+                            buildProgress = BuildProgress(percent = 0, currentStep = "构建已排队")
+                        )
                     }
                     delay(5000) // wait for GH to create the run
                     findAndMonitorLatestRun(username, repoName, wfId, previousRunId)
@@ -484,11 +534,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun openActionsPage(repo: GitHubRepo) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("${repo.htmlUrl}/actions")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { getApplication<Application>().startActivity(intent) }
+    }
+
     // ── Settings ──────────────────────────────────────────────────────────
 
     fun setAutoDownload(v: Boolean) = viewModelScope.launch { prefs.setAutoDownload(v) }
     fun setNotifyBuild(v: Boolean) = viewModelScope.launch { prefs.setNotifyBuild(v) }
     fun setThemeMode(mode: String) = viewModelScope.launch { prefs.setThemeMode(mode) }
+    fun updateBuildConfig(config: KernelBuildConfig) {
+        hasSavedBuildConfig = true
+        _uiState.update { it.copy(buildConfig = config) }
+        viewModelScope.launch { prefs.saveBuildConfigJson(gson.toJson(config)) }
+    }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
@@ -497,6 +559,112 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 }
+
+private fun detectRecommendedBuildConfig(): KernelBuildConfig {
+    val kernel = RootUtils.getKernelVersion().lowercase()
+    val base = when {
+        kernel.contains("6.12") || kernel.contains("android16") -> KernelBuildConfig(
+            androidVersion = "android16",
+            kernelVersion = "6.12",
+            subLevel = "58",
+            osPatchLevel = "2025-12",
+            revision = ""
+        )
+        kernel.contains("6.6") || kernel.contains("android15") -> KernelBuildConfig(
+            androidVersion = "android15",
+            kernelVersion = "6.6",
+            subLevel = "118",
+            osPatchLevel = "2026-01",
+            revision = ""
+        )
+        kernel.contains("6.1") || kernel.contains("android14") -> KernelBuildConfig(
+            androidVersion = "android14",
+            kernelVersion = "6.1",
+            subLevel = "157",
+            osPatchLevel = "2025-12",
+            revision = ""
+        )
+        kernel.contains("5.15") || kernel.contains("android13") -> KernelBuildConfig(
+            androidVersion = "android13",
+            kernelVersion = "5.15",
+            subLevel = "194",
+            osPatchLevel = "2025-12",
+            revision = ""
+        )
+        else -> KernelBuildConfig(
+            androidVersion = "android12",
+            kernelVersion = "5.10",
+            subLevel = "246",
+            osPatchLevel = "2025-12",
+            revision = "r1"
+        )
+    }
+    val detectedSubLevel = Regex("""\b${Regex.escape(base.kernelVersion)}\.(\d+)""")
+        .find(kernel)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?: return base
+    val patch = kernelPatchMap[base.kernelVersion]?.get(detectedSubLevel)
+    return base.copy(
+        subLevel = detectedSubLevel,
+        osPatchLevel = patch?.first ?: base.osPatchLevel,
+        revision = patch?.second ?: base.revision
+    )
+}
+
+private val kernelPatchMap = mapOf(
+    "5.10" to mapOf(
+        "66" to ("2022-01" to "r11"),
+        "81" to ("2022-03" to "r11"),
+        "101" to ("2022-04" to "r28"),
+        "110" to ("2022-07" to "r1"),
+        "117" to ("2022-09" to "r1"),
+        "136" to ("2022-11" to "r15"),
+        "149" to ("2023-01" to "r1"),
+        "160" to ("2023-03" to "r1"),
+        "168" to ("2023-04" to "r9"),
+        "177" to ("2023-07" to "r3"),
+        "185" to ("2023-09" to "r1"),
+        "198" to ("2024-01" to "r17"),
+        "205" to ("2024-03" to "r1"),
+        "209" to ("2024-05" to "r13"),
+        "218" to ("2024-08" to "r14"),
+        "226" to ("2024-11" to "r8"),
+        "233" to ("2025-02" to "r1"),
+        "236" to ("2025-05" to "r1"),
+        "237" to ("2025-06" to "r1"),
+        "240" to ("2025-09" to "r1"),
+        "246" to ("2025-12" to "r1")
+    ),
+    "5.15" to mapOf(
+        "194" to ("2025-12" to ""),
+        "189" to ("2025-09" to ""),
+        "185" to ("2025-07" to ""),
+        "180" to ("2025-05" to ""),
+        "178" to ("2025-03" to ""),
+        "170" to ("2025-01" to "")
+    ),
+    "6.1" to mapOf(
+        "157" to ("2025-12" to ""),
+        "145" to ("2025-09" to ""),
+        "141" to ("2025-07" to ""),
+        "138" to ("2025-06" to ""),
+        "134" to ("2025-05" to "")
+    ),
+    "6.6" to mapOf(
+        "118" to ("2026-01" to ""),
+        "102" to ("2025-10" to ""),
+        "98" to ("2025-09" to ""),
+        "92" to ("2025-07" to ""),
+        "89" to ("2025-06" to "")
+    ),
+    "6.12" to mapOf(
+        "58" to ("2025-12" to ""),
+        "38" to ("2025-09" to ""),
+        "30" to ("2025-07" to ""),
+        "23" to ("2025-06" to "")
+    )
+)
 
 // Helper to convert KernelBuildConfig to workflow dispatch inputs map
 private fun KernelBuildConfig.toInputMap(): Map<String, String> = mapOf(

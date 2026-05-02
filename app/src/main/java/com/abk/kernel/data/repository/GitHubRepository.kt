@@ -178,6 +178,19 @@ class GitHubRepository(
         }.getOrElse { Result.Error(it.message ?: "Unknown error") }
     }
 
+    suspend fun listRunJobs(owner: String, repo: String, runId: Long): Result<List<WorkflowJob>> {
+        val api = apiService ?: return Result.Error("Not authenticated")
+        return runCatching<Result<List<WorkflowJob>>> {
+            val resp = api.listRunJobs(owner, repo, runId)
+            if (resp.isSuccessful) {
+                val jobs: List<WorkflowJob> = resp.body()?.jobs.orEmpty()
+                Result.Success(jobs)
+            } else {
+                Result.Error("List jobs failed: ${resp.code()}", resp.code())
+            }
+        }.getOrElse { Result.Error(it.message ?: "Unknown error") }
+    }
+
     suspend fun listArtifacts(owner: String, repo: String, runId: Long): Result<List<Artifact>> {
         val api = apiService ?: return Result.Error("Not authenticated")
         return runCatching<Result<List<Artifact>>> {
