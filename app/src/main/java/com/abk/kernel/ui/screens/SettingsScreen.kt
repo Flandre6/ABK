@@ -48,10 +48,10 @@ fun SettingsScreen(vm: MainViewModel) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
-                title = stringResource(R.string.settings_title),
-                icon = Icons.Default.Settings
+                title = stringResource(R.string.settings_title)
             )
         }
     ) { padding ->
@@ -60,15 +60,9 @@ fun SettingsScreen(vm: MainViewModel) {
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SettingsHero(
-                login = state.user?.login,
-                forkName = state.forkRepo?.fullName,
-                themeMode = state.themeMode
-            )
-
             // ── 账户 ──────────────────────────────────────────────────────
             SettingsGroup(title = stringResource(R.string.settings_account)) {
                 state.user?.let { user ->
@@ -241,7 +235,7 @@ private fun SwitchSettingsItem(
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = if (checked) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+            MaterialTheme.colorScheme.primaryContainer
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.76f)
         },

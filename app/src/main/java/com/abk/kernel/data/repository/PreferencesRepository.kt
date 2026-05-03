@@ -30,7 +30,7 @@ class PreferencesRepository(private val context: Context) {
     val autoDownload: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_DOWNLOAD] ?: true }
     val notifyBuild: Flow<Boolean> = context.dataStore.data.map { it[KEY_NOTIFY_BUILD] ?: true }
     val lastRunId: Flow<Long> = context.dataStore.data.map { it[KEY_LAST_RUN_ID] ?: -1L }
-    val themeMode: Flow<String> = context.dataStore.data.map { it[KEY_THEME] ?: "system" }
+    val themeMode: Flow<String> = context.dataStore.data.map { it[KEY_THEME] ?: "dark" }
     val buildConfigJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_CONFIG] }
 
     suspend fun saveToken(token: String) = context.dataStore.edit { it[KEY_ACCESS_TOKEN] = token }

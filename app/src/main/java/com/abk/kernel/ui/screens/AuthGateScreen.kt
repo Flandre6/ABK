@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -213,19 +212,11 @@ private fun LoginScreen(
 
 @Composable
 private fun AuthShell(content: @Composable ColumnScope.() -> Unit) {
-    Scaffold { padding ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.surface) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f),
-                            MaterialTheme.colorScheme.surface,
-                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.22f)
-                        )
-                    )
-                )
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(padding),
             contentAlignment = Alignment.Center
         ) {

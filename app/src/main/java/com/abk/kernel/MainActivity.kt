@@ -16,13 +16,14 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -90,18 +91,22 @@ private fun AbkMainScaffold(vm: MainViewModel) {
     var selectedTab by rememberSaveable { mutableStateOf(AbkTab.Status) }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         bottomBar = {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                shape = RoundedCornerShape(30.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                    .height(104.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
                 tonalElevation = 6.dp,
-                shadowElevation = 8.dp
+                shadowElevation = 0.dp
             ) {
-                NavigationBar(containerColor = Color.Transparent) {
+                NavigationBar(
+                    containerColor = Color.Transparent,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.padding(horizontal = 18.dp)
+                ) {
                     AbkTab.entries.forEach { tab ->
                         NavigationBarItem(
                             selected = selectedTab == tab,
@@ -116,12 +121,13 @@ private fun AbkMainScaffold(vm: MainViewModel) {
                             icon = {
                                 Icon(
                                     imageVector = when (tab) {
-                                        AbkTab.Status -> Icons.Default.Info
-                                        AbkTab.Build -> Icons.Default.Memory
+                                        AbkTab.Status -> Icons.Default.Home
+                                        AbkTab.Build -> Icons.Default.RocketLaunch
                                         AbkTab.Flash -> Icons.Default.FlashOn
                                         AbkTab.Settings -> Icons.Default.Settings
                                     },
-                                    contentDescription = tab.label
+                                    contentDescription = tab.label,
+                                    modifier = Modifier.size(32.dp)
                                 )
                             },
                             label = { Text(tab.label) }

@@ -86,10 +86,11 @@ fun FlashScreen(vm: MainViewModel) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
                 title = stringResource(R.string.flash_title),
-                icon = Icons.Default.FlashOn
+                icon = Icons.Default.MoreVert
             )
         }
     ) { padding ->
@@ -97,9 +98,9 @@ fun FlashScreen(vm: MainViewModel) {
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 16.dp)
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             item {
                 FlashHero(
@@ -239,7 +240,8 @@ private fun ArtifactDownloadCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -262,7 +264,15 @@ private fun ArtifactDownloadCard(
                 LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth())
                 Text("下载中 $progress%", style = MaterialTheme.typography.labelSmall)
             } else if (!alreadyDownloaded) {
-                Button(onClick = onDownload, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onDownload,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(54.dp)
+                ) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("下载")
@@ -287,7 +297,8 @@ private fun DownloadedArtifactCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
