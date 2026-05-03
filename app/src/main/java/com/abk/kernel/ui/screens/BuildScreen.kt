@@ -70,8 +70,7 @@ fun BuildScreen(vm: MainViewModel) {
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
-                title = stringResource(R.string.build_title),
-                icon = Icons.Default.MoreVert
+                title = stringResource(R.string.build_title)
             )
         }
     ) { padding ->

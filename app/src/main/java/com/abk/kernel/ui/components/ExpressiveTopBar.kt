@@ -5,16 +5,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -23,7 +20,6 @@ import androidx.compose.ui.unit.dp
 fun ExpressiveTopBar(
     title: String,
     modifier: Modifier = Modifier,
-    icon: ImageVector? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
@@ -39,13 +35,13 @@ fun ExpressiveTopBar(
                 .fillMaxWidth()
                 .background(colors.surface)
                 .statusBarsPadding()
-                .padding(start = 22.dp, end = 18.dp, top = 34.dp, bottom = 28.dp),
+                .padding(start = 22.dp, end = 18.dp, top = 22.dp, bottom = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Normal,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
                 color = colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -53,14 +49,6 @@ fun ExpressiveTopBar(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 actions()
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = colors.onSurface.copy(alpha = 0.82f),
-                        modifier = Modifier.padding(start = 14.dp).size(34.dp)
-                    )
-                }
             }
         }
     }

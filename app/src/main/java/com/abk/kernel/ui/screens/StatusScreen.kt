@@ -41,8 +41,7 @@ fun StatusScreen(vm: MainViewModel) {
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
-                title = stringResource(R.string.app_name),
-                icon = Icons.Default.PowerSettingsNew
+                title = stringResource(R.string.app_name)
             )
         }
     ) { padding ->

@@ -109,8 +109,7 @@ fun FlashScreen(vm: MainViewModel) {
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
-                title = stringResource(R.string.flash_title),
-                icon = Icons.Default.MoreVert
+                title = stringResource(R.string.flash_title)
             )
         }
     ) { padding ->
