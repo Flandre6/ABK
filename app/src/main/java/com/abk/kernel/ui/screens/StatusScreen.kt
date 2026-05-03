@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.abk.kernel.BuildConfig
 import com.abk.kernel.R
 import com.abk.kernel.data.model.BuildStatus
 import com.abk.kernel.data.model.WorkflowRun
@@ -53,15 +54,23 @@ fun StatusScreen(vm: MainViewModel) {
                 .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            val ksuVersion = remember(state.rootGranted) { RootUtils.getKsuVersion() }
-            val kernelVersion = remember(state.rootGranted) { RootUtils.getKernelVersion() }
+            val ksuVersion = remember(state.rootGranted) {
+                if (state.rootGranted) RootUtils.getKsuVersion() else "N/A"
+            }
+            val kernelVersion = remember(state.rootGranted) {
+                if (state.rootGranted) RootUtils.getKernelVersion() else "Unknown"
+            }
 
             ExpressiveHeroCard(
-                title = if (state.rootGranted) "工作中" else "等待授权",
-                subtitle = "版本：${state.currentRun?.runNumber ?: "ABK"}",
-                icon = if (state.rootGranted) Icons.Default.CheckCircleOutline else Icons.Default.LockOpen,
+                title = if (state.rootGranted) "工作中" else "部分激活",
+                subtitle = if (state.rootGranted) {
+                    state.currentRun?.let { "构建：#${it.runNumber}" } ?: "版本：${BuildConfig.VERSION_NAME}"
+                } else {
+                    "版本：${BuildConfig.VERSION_NAME} · 构建和下载可用"
+                },
+                icon = if (state.rootGranted) Icons.Default.CheckCircleOutline else Icons.Default.Info,
                 containerColor = if (state.rootGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                contentColor = if (state.rootGranted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                 badge = {
                     ExpressiveStatusChip(
                         label = if (state.rootGranted) "Root 已授权" else "Root 未授权",
@@ -74,7 +83,24 @@ fun StatusScreen(vm: MainViewModel) {
                         color = if (state.forkRepo != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
                     )
                 }
-            )
+            ) {
+                if (!state.rootGranted) {
+                    OutlinedButton(
+                        onClick = { vm.requestRoot() },
+                        enabled = !state.isLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        if (state.isLoading) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Lock, null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.grant_root))
+                        }
+                    }
+                }
+            }
 
             StatusMetricGrid(
                 rootGranted = state.rootGranted,
@@ -200,9 +226,9 @@ private fun StatusMetricGrid(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             StatusMetricCard(
                 label = "Root",
-                value = if (rootGranted) "Granted" else "Denied",
+                value = if (rootGranted) "Granted" else "Partial",
                 icon = if (rootGranted) Icons.Default.Lock else Icons.Default.LockOpen,
-                color = if (rootGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                color = if (rootGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.weight(1f)
             )
             StatusMetricCard(

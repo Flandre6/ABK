@@ -33,14 +33,16 @@ android {
         applicationId = "com.abk.kernel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"${githubClientId.get()}\"")
         buildConfigField("String", "SOURCE_REPO_OWNER", "\"xingguangcuican6666\"")
         buildConfigField("String", "SOURCE_REPO_NAME", "\"ABK\"")
+        buildConfigField("String", "UPSTREAM_REPO_URL", "\"https://github.com/zzh20188/GKI_KernelSU_SUSFS\"")
+        buildConfigField("String", "TOP_LEVEL_REPO_URL", "\"https://github.com/WildKernels/GKI_KernelSU_SUSFS\"")
     }
 
     signingConfigs {

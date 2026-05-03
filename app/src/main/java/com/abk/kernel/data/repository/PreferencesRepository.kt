@@ -24,6 +24,7 @@ class PreferencesRepository(private val context: Context) {
         val KEY_DOWNLOADED_ARTIFACTS = stringPreferencesKey("downloaded_artifacts_json")
         val KEY_REMOTE_ARTIFACTS = stringPreferencesKey("remote_artifacts_json")
         val KEY_PENDING_AUTO_DOWNLOAD_RUN_ID = longPreferencesKey("pending_auto_download_run_id")
+        val KEY_DOWNLOAD_MIRROR_BASE_URL = stringPreferencesKey("download_mirror_base_url")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { it[KEY_ACCESS_TOKEN] }
@@ -38,6 +39,7 @@ class PreferencesRepository(private val context: Context) {
     val downloadedArtifactsJson: Flow<String?> = context.dataStore.data.map { it[KEY_DOWNLOADED_ARTIFACTS] }
     val remoteArtifactsJson: Flow<String?> = context.dataStore.data.map { it[KEY_REMOTE_ARTIFACTS] }
     val pendingAutoDownloadRunId: Flow<Long> = context.dataStore.data.map { it[KEY_PENDING_AUTO_DOWNLOAD_RUN_ID] ?: -1L }
+    val downloadMirrorBaseUrl: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_MIRROR_BASE_URL] ?: "" }
 
     suspend fun saveToken(token: String) = context.dataStore.edit { it[KEY_ACCESS_TOKEN] = token }
     suspend fun saveUsername(name: String) = context.dataStore.edit { it[KEY_USERNAME] = name }
@@ -51,6 +53,7 @@ class PreferencesRepository(private val context: Context) {
     suspend fun saveDownloadedArtifactsJson(json: String) = context.dataStore.edit { it[KEY_DOWNLOADED_ARTIFACTS] = json }
     suspend fun saveRemoteArtifactsJson(json: String) = context.dataStore.edit { it[KEY_REMOTE_ARTIFACTS] = json }
     suspend fun savePendingAutoDownloadRunId(id: Long) = context.dataStore.edit { it[KEY_PENDING_AUTO_DOWNLOAD_RUN_ID] = id }
+    suspend fun setDownloadMirrorBaseUrl(url: String) = context.dataStore.edit { it[KEY_DOWNLOAD_MIRROR_BASE_URL] = url }
     suspend fun clearPendingAutoDownloadRunId() = context.dataStore.edit { it.remove(KEY_PENDING_AUTO_DOWNLOAD_RUN_ID) }
 
     suspend fun clearAuth() = context.dataStore.edit {

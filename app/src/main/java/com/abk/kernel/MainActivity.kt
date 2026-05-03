@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -88,7 +89,16 @@ private enum class AbkTab(val label: String) {
 
 @Composable
 private fun AbkMainScaffold(vm: MainViewModel) {
+    val state by vm.uiState.collectAsState()
     var selectedTab by rememberSaveable { mutableStateOf(AbkTab.Status) }
+    val visibleTabs = if (state.rootGranted) AbkTab.entries else AbkTab.entries.filterNot { it == AbkTab.Flash }
+    val activeTab = if (!state.rootGranted && selectedTab == AbkTab.Flash) AbkTab.Status else selectedTab
+
+    LaunchedEffect(state.rootGranted, selectedTab) {
+        if (!state.rootGranted && selectedTab == AbkTab.Flash) {
+            selectedTab = AbkTab.Status
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -107,9 +117,9 @@ private fun AbkMainScaffold(vm: MainViewModel) {
                     tonalElevation = 0.dp,
                     modifier = Modifier.padding(horizontal = 10.dp)
                 ) {
-                    AbkTab.entries.forEach { tab ->
+                    visibleTabs.forEach { tab ->
                         NavigationBarItem(
-                            selected = selectedTab == tab,
+                            selected = activeTab == tab,
                             onClick = { selectedTab = tab },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -144,7 +154,7 @@ private fun AbkMainScaffold(vm: MainViewModel) {
     ) { padding ->
         androidx.compose.foundation.layout.Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             AnimatedContent(
-                targetState = selectedTab,
+                targetState = activeTab,
                 transitionSpec = {
                     val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
                     (

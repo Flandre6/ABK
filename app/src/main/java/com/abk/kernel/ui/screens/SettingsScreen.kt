@@ -1,5 +1,7 @@
 package com.abk.kernel.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,6 +30,7 @@ import com.abk.kernel.viewmodel.MainViewModel
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
     val state by vm.uiState.collectAsState()
+    val context = LocalContext.current
     var showLogoutDialog by remember { mutableStateOf(false) }
 
     if (showLogoutDialog) {
@@ -103,6 +107,11 @@ fun SettingsScreen(vm: MainViewModel) {
                     checked = state.autoDownload,
                     onCheckedChange = { vm.setAutoDownload(it) }
                 )
+                Spacer(Modifier.height(10.dp))
+                MirrorSettingsItem(
+                    value = state.downloadMirrorBaseUrl,
+                    onValueChange = { vm.setDownloadMirrorBaseUrl(it) }
+                )
             }
 
             // ── 通知 ──────────────────────────────────────────────────────
@@ -161,12 +170,42 @@ fun SettingsScreen(vm: MainViewModel) {
                     supportingContent = {
                         Text("${BuildConfig.SOURCE_REPO_OWNER}/${BuildConfig.SOURCE_REPO_NAME}")
                     },
-                    leadingContent = { Icon(Icons.Default.Code, null) }
+                    leadingContent = { Icon(Icons.Default.Code, null) },
+                    trailingContent = { Icon(Icons.Default.OpenInBrowser, null) },
+                    modifier = Modifier.clickable {
+                        openUrl(context, "https://github.com/${BuildConfig.SOURCE_REPO_OWNER}/${BuildConfig.SOURCE_REPO_NAME}")
+                    }
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("上游源仓库") },
+                    supportingContent = { Text(BuildConfig.UPSTREAM_REPO_URL) },
+                    leadingContent = { Icon(Icons.Default.ForkRight, null) },
+                    trailingContent = { Icon(Icons.Default.OpenInBrowser, null) },
+                    modifier = Modifier.clickable {
+                        openUrl(context, BuildConfig.UPSTREAM_REPO_URL)
+                    }
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("顶层仓库") },
+                    supportingContent = { Text(BuildConfig.TOP_LEVEL_REPO_URL) },
+                    leadingContent = { Icon(Icons.Default.Code, null) },
+                    trailingContent = { Icon(Icons.Default.OpenInBrowser, null) },
+                    modifier = Modifier.clickable {
+                        openUrl(context, BuildConfig.TOP_LEVEL_REPO_URL)
+                    }
                 )
             }
 
             Spacer(Modifier.height(80.dp))
         }
+    }
+}
+
+private fun openUrl(context: android.content.Context, url: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 }
 
@@ -256,6 +295,43 @@ private fun SwitchSettingsItem(
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
+@Composable
+private fun MirrorSettingsItem(
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.76f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Default.Public, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("下载镜像站", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "留空直连 GitHub；填写后会先镜像到 Release 再下载",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                placeholder = { Text("https://hk.gh-proxy.org/") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp)
+            )
         }
     }
 }

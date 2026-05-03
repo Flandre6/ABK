@@ -102,16 +102,22 @@ object DownloadUtils {
 
     suspend fun downloadArtifact(
         context: Context,
-        token: String,
+        token: String?,
         artifact: Artifact,
         run: WorkflowRun? = null,
+        downloadUrl: String? = null,
         onProgress: (Int) -> Unit = {}
     ): List<DownloadedArtifact> = withContext(Dispatchers.IO) {
         try {
+            val url = downloadUrl ?: artifact.archiveDownloadUrl
             val request = Request.Builder()
-                .url(artifact.archiveDownloadUrl)
-                .header("Authorization", "Bearer $token")
-                .header("Accept", "application/vnd.github+json")
+                .url(url)
+                .header("Accept", if (downloadUrl == null) "application/vnd.github+json" else "application/octet-stream")
+                .apply {
+                    if (downloadUrl == null && !token.isNullOrBlank()) {
+                        header("Authorization", "Bearer $token")
+                    }
+                }
                 .build()
 
             val response = client.newCall(request).execute()

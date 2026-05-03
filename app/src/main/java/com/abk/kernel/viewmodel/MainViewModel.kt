@@ -30,7 +30,7 @@ import java.io.File
 enum class AuthStep { CHECK_ROOT, LOGIN, FORK_CHECK, READY }
 
 data class MainUiState(
-    val authStep: AuthStep = AuthStep.CHECK_ROOT,
+    val authStep: AuthStep = AuthStep.LOGIN,
     val rootGranted: Boolean = false,
     val isLoggedIn: Boolean = false,
     val user: GitHubUser? = null,
@@ -60,7 +60,8 @@ data class MainUiState(
     // Settings
     val autoDownload: Boolean = true,
     val notifyBuild: Boolean = true,
-    val themeMode: String = "dark"
+    val themeMode: String = "dark",
+    val downloadMirrorBaseUrl: String = ""
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -70,6 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val gson = Gson()
     private var hasSavedBuildConfig = false
     private var monitoredRunId: Long = -1L
+    private val preparedMirrorArtifacts = mutableMapOf<Long, Set<String>>()
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -115,8 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }.collect { (token, name, avatar, autoDl, notify) ->
                 if (!token.isNullOrBlank()) {
                     github.updateToken(token)
-                    val shouldResumeSetup = _uiState.value.rootGranted &&
-                        !_uiState.value.isPollingToken &&
+                    val shouldResumeSetup = !_uiState.value.isPollingToken &&
                         _uiState.value.authStep in setOf(AuthStep.CHECK_ROOT, AuthStep.LOGIN)
                     _uiState.update {
                         it.copy(
@@ -155,6 +156,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             prefs.themeMode.collect { mode ->
                 _uiState.update { it.copy(themeMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            prefs.downloadMirrorBaseUrl.collect { url ->
+                _uiState.update { it.copy(downloadMirrorBaseUrl = url) }
             }
         }
         viewModelScope.launch {
@@ -209,6 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun checkRoot() {
         viewModelScope.launch {
+            val shouldAdvance = _uiState.value.authStep != AuthStep.READY
             val granted = RootUtils.isRootAvailable()
             val recommended = if (granted) detectRecommendedBuildConfig() else null
             _uiState.update {
@@ -222,12 +229,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 )
             }
-            if (granted) advanceStep()
+            if (shouldAdvance) advanceStep()
         }
     }
 
     fun requestRoot() {
         viewModelScope.launch {
+            val shouldAdvance = _uiState.value.authStep != AuthStep.READY
             _uiState.update { it.copy(isLoading = true) }
             val granted = RootUtils.requestRoot()
             val recommended = if (granted) detectRecommendedBuildConfig() else null
@@ -243,14 +251,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 )
             }
-            if (granted) advanceStep()
+            if (shouldAdvance) advanceStep()
         }
     }
 
     private fun advanceStep() {
         val state = _uiState.value
         when {
-            !state.rootGranted -> _uiState.update { it.copy(authStep = AuthStep.CHECK_ROOT) }
             !state.isLoggedIn -> _uiState.update { it.copy(authStep = AuthStep.LOGIN) }
             state.user == null -> {
                 _uiState.update { it.copy(authStep = AuthStep.LOGIN) }
@@ -343,7 +350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 MainUiState(
                     rootGranted = it.rootGranted,
-                    authStep = if (it.rootGranted) AuthStep.LOGIN else AuthStep.CHECK_ROOT
+                    authStep = AuthStep.LOGIN
                 )
             }
         }
@@ -613,44 +620,185 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         artifact: BuildArtifact
     ) {
         viewModelScope.launch {
-            val token = prefs.accessToken.first()
-            if (token.isNullOrBlank()) {
-                _uiState.update { it.copy(isDownloading = false, error = "未登录，无法下载构建产物") }
-                return@launch
+            downloadArtifactNow(artifact)
+        }
+    }
+
+    private suspend fun downloadArtifactNow(artifact: BuildArtifact) {
+        val token = prefs.accessToken.first()
+        if (token.isNullOrBlank()) {
+            _uiState.update { it.copy(isDownloading = false, error = "未登录，无法下载构建产物") }
+            return
+        }
+        _uiState.update { it.copy(isDownloading = true) }
+        NotificationUtils.notifyDownloadProgress(getApplication(), 0, artifact.name)
+        val mirrorBaseUrl = prefs.downloadMirrorBaseUrl.first()
+        val downloadUrl = if (mirrorBaseUrl.isNotBlank()) {
+            prepareMirroredArtifactUrl(artifact, mirrorBaseUrl)
+        } else {
+            null
+        }
+        if (mirrorBaseUrl.isNotBlank() && downloadUrl == null) {
+            _uiState.update {
+                it.copy(
+                    isDownloading = false,
+                    error = it.error ?: "镜像下载准备失败: ${artifact.name}",
+                    downloadProgress = it.downloadProgress - artifact.id
+                )
             }
-            _uiState.update { it.copy(isDownloading = true) }
-            NotificationUtils.notifyDownloadProgress(getApplication(), 0, artifact.name)
-            val results = DownloadUtils.downloadArtifact(
-                getApplication(), token, artifact.toArtifact(), artifact.toWorkflowRun()
-            ) { pct ->
-                NotificationUtils.notifyDownloadProgress(getApplication(), pct, artifact.name)
-                _uiState.update { s ->
-                    s.copy(downloadProgress = s.downloadProgress + (artifact.id to pct))
-                }
-            }
-            if (results.isNotEmpty()) {
-                NotificationUtils.notifyDownloadDone(getApplication(), artifact.name)
-                val updated = (_uiState.value.downloadedArtifacts + results)
-                    .distinctBy { it.filePath }
-                    .sortedDownloadedForDisplay()
-                _uiState.update { s ->
-                    s.copy(
-                        isDownloading = false,
-                        downloadedArtifacts = updated,
-                        downloadProgress = s.downloadProgress - artifact.id
-                    )
-                }
-                prefs.saveDownloadedArtifactsJson(gson.toJson(updated))
-            } else {
-                _uiState.update {
-                    it.copy(
-                        isDownloading = false,
-                        error = "下载失败: ${artifact.name}",
-                        downloadProgress = it.downloadProgress - artifact.id
-                    )
-                }
+            return
+        }
+        val results = DownloadUtils.downloadArtifact(
+            getApplication(),
+            if (downloadUrl == null) token else null,
+            artifact.toArtifact(),
+            artifact.toWorkflowRun(),
+            downloadUrl
+        ) { pct ->
+            NotificationUtils.notifyDownloadProgress(getApplication(), pct, artifact.name)
+            _uiState.update { s ->
+                s.copy(downloadProgress = s.downloadProgress + (artifact.id to pct))
             }
         }
+        if (results.isNotEmpty()) {
+            NotificationUtils.notifyDownloadDone(getApplication(), artifact.name)
+            val updated = (_uiState.value.downloadedArtifacts + results)
+                .distinctBy { it.filePath }
+                .sortedDownloadedForDisplay()
+            _uiState.update { s ->
+                s.copy(
+                    isDownloading = false,
+                    downloadedArtifacts = updated,
+                    downloadProgress = s.downloadProgress - artifact.id
+                )
+            }
+            prefs.saveDownloadedArtifactsJson(gson.toJson(updated))
+        } else {
+            _uiState.update {
+                it.copy(
+                    isDownloading = false,
+                    error = "下载失败: ${artifact.name}",
+                    downloadProgress = it.downloadProgress - artifact.id
+                )
+            }
+        }
+    }
+
+    private suspend fun prepareMirroredArtifactUrl(
+        artifact: BuildArtifact,
+        mirrorBaseUrl: String
+    ): String? {
+        val state = _uiState.value
+        val username = state.user?.login ?: return null
+        val repoName = state.forkRepo?.name ?: return null
+        val ref = state.forkRepo?.defaultBranch ?: "main"
+        if (preparedMirrorArtifacts[artifact.runId]?.contains(artifact.name) == true) {
+            return normalizeMirrorBaseUrl(mirrorBaseUrl) + releaseAssetUrl(username, repoName, artifact.runId, artifact.name)
+        }
+        val targetNames = mirrorTargetArtifactNames(artifact)
+        if (targetNames.isEmpty()) {
+            _uiState.update { it.copy(error = "没有可镜像的构建产物: ${artifact.name}") }
+            return null
+        }
+
+        _uiState.update { s ->
+            s.copy(
+                downloadProgress = s.downloadProgress + (artifact.id to 1),
+                error = null
+            )
+        }
+        val workflowId = when (val wf = github.getWorkflowId(username, repoName, MIRROR_WORKFLOW_FILE)) {
+            is Result.Success -> wf.data
+            is Result.Error -> {
+                _uiState.update { it.copy(error = "镜像工作流不存在，请同步 Fork: ${wf.message}") }
+                return null
+            }
+            else -> return null
+        }
+        github.enableWorkflow(username, repoName, workflowId)
+        val previousRunId = when (val prior = github.listRecentRuns(username, repoName, 1, workflowId)) {
+            is Result.Success -> prior.data.firstOrNull()?.id
+            else -> null
+        }
+        val inputs = mapOf(
+            "source_run_id" to artifact.runId.toString(),
+            "artifact_names" to targetNames.joinToString("\n")
+        )
+        when (val dispatch = github.dispatchWorkflow(username, repoName, workflowId, inputs, ref)) {
+            is Result.Error -> {
+                _uiState.update { it.copy(error = "触发镜像工作流失败: ${dispatch.message}") }
+                return null
+            }
+            else -> {}
+        }
+        delay(5_000)
+        val run = findMirrorWorkflowRun(username, repoName, workflowId, previousRunId) ?: run {
+            _uiState.update { it.copy(error = "已触发镜像工作流，但暂未找到运行记录") }
+            return null
+        }
+        val completed = waitForMirrorWorkflow(username, repoName, run.id, artifact.id) ?: return null
+        if (completed.conclusion != "success") {
+            _uiState.update { it.copy(error = "镜像工作流失败: ${completed.conclusion ?: "unknown"}") }
+            return null
+        }
+        _uiState.update { s -> s.copy(downloadProgress = s.downloadProgress + (artifact.id to 5)) }
+        preparedMirrorArtifacts[artifact.runId] = (preparedMirrorArtifacts[artifact.runId].orEmpty() + targetNames).toSet()
+        val releaseUrl = releaseAssetUrl(username, repoName, artifact.runId, artifact.name)
+        return normalizeMirrorBaseUrl(mirrorBaseUrl) + releaseUrl
+    }
+
+    private fun mirrorTargetArtifactNames(artifact: BuildArtifact): List<String> {
+        val sameRunTargets = _uiState.value.artifacts
+            .filter { it.runId == artifact.runId && !it.expired && DownloadUtils.shouldAutoDownload(it) }
+            .map { it.name }
+        return (sameRunTargets + artifact.name).distinct()
+    }
+
+    private suspend fun findMirrorWorkflowRun(
+        owner: String,
+        repoName: String,
+        workflowId: Long,
+        previousRunId: Long?
+    ): WorkflowRun? {
+        repeat(6) { attempt ->
+            when (val runs = github.listRecentRuns(owner, repoName, 5, workflowId)) {
+                is Result.Success -> {
+                    val run = runs.data.firstOrNull { previousRunId == null || it.id > previousRunId }
+                    if (run != null) return run
+                }
+                else -> {}
+            }
+            if (attempt < 5) delay(5_000)
+        }
+        return null
+    }
+
+    private suspend fun waitForMirrorWorkflow(
+        owner: String,
+        repoName: String,
+        runId: Long,
+        artifactId: Long
+    ): WorkflowRun? {
+        repeat(MIRROR_WORKFLOW_MAX_POLLS) { attempt ->
+            when (val run = github.getWorkflowRun(owner, repoName, runId)) {
+                is Result.Success -> {
+                    val data = run.data
+                    if (data.status == "completed") return data
+                    _uiState.update { s ->
+                        val current = s.downloadProgress[artifactId] ?: 1
+                        s.copy(downloadProgress = s.downloadProgress + (artifactId to (current + 1).coerceAtMost(20)))
+                    }
+                }
+                is Result.Error -> {
+                    _uiState.update { it.copy(error = "查询镜像工作流失败: ${run.message}") }
+                    return null
+                }
+                else -> {}
+            }
+            if (attempt < MIRROR_WORKFLOW_MAX_POLLS - 1) delay(15_000)
+        }
+        _uiState.update { it.copy(error = "镜像工作流等待超时") }
+        return null
     }
 
     private suspend fun refreshArtifactsForRuns(
@@ -703,7 +851,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         prefs.clearPendingAutoDownloadRunId()
-        targets.forEach { downloadArtifact(it) }
+        targets.forEach { downloadArtifactNow(it) }
     }
 
     private fun openActionsPage(repo: GitHubRepo) {
@@ -721,6 +869,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun setNotifyBuild(v: Boolean) = viewModelScope.launch { prefs.setNotifyBuild(v) }
     fun setThemeMode(mode: String) = viewModelScope.launch { prefs.setThemeMode(mode) }
+    fun setDownloadMirrorBaseUrl(url: String) = viewModelScope.launch {
+        prefs.setDownloadMirrorBaseUrl(url.trim())
+    }
     fun updateBuildConfig(config: KernelBuildConfig) {
         val normalized = KernelSupport.normalize(config)
         hasSavedBuildConfig = true
@@ -791,6 +942,20 @@ private fun KernelBuildConfig.toInputMap(): Map<String, String> = mapOf(
 
 private const val MAX_REMOTE_ARTIFACT_RUNS = 30
 private const val MAX_PERSISTED_REMOTE_ARTIFACTS = 240
+private const val MIRROR_WORKFLOW_FILE = "mirror-custom-artifacts.yml"
+private const val MIRROR_WORKFLOW_MAX_POLLS = 40
+
+private fun normalizeMirrorBaseUrl(url: String): String {
+    val trimmed = url.trim()
+    if (trimmed.isBlank()) return ""
+    return if (trimmed.endsWith("/")) trimmed else "$trimmed/"
+}
+
+private fun releaseAssetUrl(owner: String, repoName: String, runId: Long, artifactName: String): String {
+    val tag = "mirror-custom-run-$runId"
+    val asset = Uri.encode("$artifactName.zip")
+    return "https://github.com/$owner/$repoName/releases/download/$tag/$asset"
+}
 
 private fun Artifact.toBuildArtifact(runId: Long): BuildArtifact = BuildArtifact(
     id = id,
