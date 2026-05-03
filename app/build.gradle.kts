@@ -24,7 +24,7 @@ android {
 
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"${githubClientId.get()}\"")
         buildConfigField("String", "SOURCE_REPO_OWNER", "\"xingguangcuican6666\"")
-        buildConfigField("String", "SOURCE_REPO_NAME", "\"GKI_KernelSU_SUSFS\"")
+        buildConfigField("String", "SOURCE_REPO_NAME", "\"ABK\"")
     }
 
     buildTypes {
