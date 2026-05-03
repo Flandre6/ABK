@@ -17,9 +17,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.abk.kernel.R
-import com.abk.kernel.data.model.Artifact
 import com.abk.kernel.data.model.ArtifactCategory
 import com.abk.kernel.data.model.ArtifactType
+import com.abk.kernel.data.model.BuildArtifact
 import com.abk.kernel.data.model.BuildStatus
 import com.abk.kernel.data.model.DownloadedArtifact
 import com.abk.kernel.ui.components.ExpressiveEmptyState
@@ -41,12 +41,18 @@ fun FlashScreen(vm: MainViewModel) {
     var flashLog by remember { mutableStateOf<List<String>>(emptyList()) }
     var showLogDialog by remember { mutableStateOf(false) }
     var flashSuccess by remember { mutableStateOf<Boolean?>(null) }
-    val groupedAvailableArtifacts = remember(state.artifacts) {
-        state.artifacts.filter { !it.expired }
-            .groupBy { DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) }
+    val availableArtifactsByRun = remember(state.artifacts) {
+        state.artifacts.filter {
+            !it.expired && DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) != null
+        }
+            .groupBy { it.runId to it.runTitle.ifBlank { "未关联工作流" } }
     }
     val downloadedArtifactsByRun = remember(state.downloadedArtifacts) {
         state.downloadedArtifacts.groupBy { it.runId to it.runTitle.ifBlank { "未关联工作流" } }
+    }
+
+    LaunchedEffect(state.forkRepo?.fullName) {
+        if (state.forkRepo != null) vm.loadRecentRuns()
     }
 
     if (showFlashConfirm && selectedItem != null) {
@@ -124,47 +130,61 @@ fun FlashScreen(vm: MainViewModel) {
             item {
                 FlashHero(
                     buildStatus = state.buildStatus,
-                    availableCount = state.artifacts.size,
+                    availableCount = availableArtifactsByRun.values.sumOf { it.size },
                     downloadedCount = state.downloadedArtifacts.size
                 )
             }
 
-            // ── Available artifacts to download ──
-            if (state.buildStatus == BuildStatus.SUCCESS && state.artifacts.isNotEmpty()) {
-                artifactCategoryOrder.forEach { category ->
-                    val artifacts = groupedAvailableArtifacts[category].orEmpty()
-                    if (artifacts.isNotEmpty()) {
-                        item("available-${category.name}") {
-                            ExpressiveSectionCard(
-                                title = "${category.label()} · 可下载",
-                                subtitle = category.availableSubtitle(),
-                                icon = category.icon()
-                            ) {}
+            // ── Online artifacts to download ──
+            if (availableArtifactsByRun.isNotEmpty()) {
+                availableArtifactsByRun.forEach { (runKey, runArtifacts) ->
+                    val first = runArtifacts.first()
+                    item("available-run-${runKey.first}") {
+                        ExpressiveSectionCard(
+                            title = "可下载 · 工作流 ${if (first.runNumber > 0) "#${first.runNumber}" else ""}",
+                            subtitle = runKey.second,
+                            icon = Icons.Default.CloudDownload
+                        ) {}
+                    }
+                    artifactCategoryOrder.forEach { category ->
+                        val artifacts = runArtifacts.filter {
+                            DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) == category
                         }
-                        items(artifacts, key = { it.id }) { artifact ->
-                            ArtifactDownloadCard(
-                                artifact = artifact,
-                                progress = state.downloadProgress[artifact.id],
-                                alreadyDownloaded = state.downloadedArtifacts.any {
-                                    it.runId == state.currentRun?.id && it.filePath.contains("/${artifact.name}/")
-                                },
-                                autoDownloadEligible = DownloadUtils.shouldAutoDownload(artifact),
-                                onDownload = { vm.downloadArtifact(artifact) }
-                            )
+                        if (artifacts.isNotEmpty()) {
+                            item("available-run-${runKey.first}-${category.name}") {
+                                Text(
+                                    category.label(),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 6.dp, top = 4.dp)
+                                )
+                            }
+                            items(artifacts, key = { it.id }) { artifact ->
+                                ArtifactDownloadCard(
+                                    artifact = artifact,
+                                    progress = state.downloadProgress[artifact.id],
+                                    alreadyDownloaded = state.downloadedArtifacts.any {
+                                        it.runId == artifact.runId && it.filePath.contains("/${artifact.name}/")
+                                    },
+                                    autoDownloadEligible = state.autoDownload &&
+                                        state.pendingAutoDownloadRunId == artifact.runId &&
+                                        DownloadUtils.shouldAutoDownload(artifact),
+                                    onDownload = { vm.downloadArtifact(artifact) }
+                                )
+                            }
                         }
                     }
                 }
-            } else if (state.currentRun != null && state.buildStatus == BuildStatus.SUCCESS && state.artifacts.isEmpty()) {
+            } else {
                 item {
-                    state.currentRun?.let { run ->
-                        OutlinedButton(
-                            onClick = { vm.loadArtifacts(run.id) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Refresh, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.download_artifacts))
-                        }
+                    OutlinedButton(
+                        onClick = { vm.loadRecentRuns() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Refresh, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("联网刷新构建产物")
                     }
                 }
             }
@@ -231,7 +251,7 @@ private fun FlashHero(
 ) {
     ExpressiveHeroCard(
         title = "产物中心",
-        subtitle = "下载构建输出，并按文件类型选择刷写、安装或交给恢复环境处理。",
+        subtitle = "联网同步最近构建输出，并按工作流、内核、管理器和模块整理。",
         icon = Icons.Default.FlashOn,
         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
         contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -268,7 +288,7 @@ private fun FlashHero(
 
 @Composable
 private fun ArtifactDownloadCard(
-    artifact: Artifact,
+    artifact: BuildArtifact,
     progress: Int?,
     alreadyDownloaded: Boolean,
     autoDownloadEligible: Boolean,
@@ -298,7 +318,7 @@ private fun ArtifactDownloadCard(
                     Text(DownloadUtils.formatSize(artifact.sizeInBytes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 ExpressiveStatusChip(
-                    label = if (autoDownloadEligible) "自动下载" else artifactTypeLabel(type),
+                    label = if (autoDownloadEligible) "下次自动" else artifactTypeLabel(type),
                     color = MaterialTheme.colorScheme.primary
                 )
             }
@@ -454,16 +474,4 @@ private fun ArtifactCategory.label(): String = when (this) {
     ArtifactCategory.KERNEL -> "内核"
     ArtifactCategory.MANAGER -> "管理器"
     ArtifactCategory.MODULE -> "模块"
-}
-
-private fun ArtifactCategory.availableSubtitle(): String = when (this) {
-    ArtifactCategory.KERNEL -> "boot.img 可直接写入当前槽位，AK3 包可在应用内执行刷入。"
-    ArtifactCategory.MANAGER -> "自动下载只会选择当前设备 ABI / SDK 可能支持的管理器 APK。"
-    ArtifactCategory.MODULE -> "模块会按 KernelSU、Magisk、APatch 自动选择安装命令。"
-}
-
-private fun ArtifactCategory.icon() = when (this) {
-    ArtifactCategory.KERNEL -> Icons.Default.Memory
-    ArtifactCategory.MANAGER -> Icons.Default.Shield
-    ArtifactCategory.MODULE -> Icons.Default.Extension
 }

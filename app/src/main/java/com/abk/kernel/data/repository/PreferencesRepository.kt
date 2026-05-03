@@ -21,6 +21,9 @@ class PreferencesRepository(private val context: Context) {
         val KEY_LAST_RUN_ID = longPreferencesKey("last_run_id")
         val KEY_THEME = stringPreferencesKey("theme_mode") // "system" | "light" | "dark"
         val KEY_BUILD_CONFIG = stringPreferencesKey("build_config_json")
+        val KEY_DOWNLOADED_ARTIFACTS = stringPreferencesKey("downloaded_artifacts_json")
+        val KEY_REMOTE_ARTIFACTS = stringPreferencesKey("remote_artifacts_json")
+        val KEY_PENDING_AUTO_DOWNLOAD_RUN_ID = longPreferencesKey("pending_auto_download_run_id")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { it[KEY_ACCESS_TOKEN] }
@@ -32,6 +35,9 @@ class PreferencesRepository(private val context: Context) {
     val lastRunId: Flow<Long> = context.dataStore.data.map { it[KEY_LAST_RUN_ID] ?: -1L }
     val themeMode: Flow<String> = context.dataStore.data.map { it[KEY_THEME] ?: "dark" }
     val buildConfigJson: Flow<String?> = context.dataStore.data.map { it[KEY_BUILD_CONFIG] }
+    val downloadedArtifactsJson: Flow<String?> = context.dataStore.data.map { it[KEY_DOWNLOADED_ARTIFACTS] }
+    val remoteArtifactsJson: Flow<String?> = context.dataStore.data.map { it[KEY_REMOTE_ARTIFACTS] }
+    val pendingAutoDownloadRunId: Flow<Long> = context.dataStore.data.map { it[KEY_PENDING_AUTO_DOWNLOAD_RUN_ID] ?: -1L }
 
     suspend fun saveToken(token: String) = context.dataStore.edit { it[KEY_ACCESS_TOKEN] = token }
     suspend fun saveUsername(name: String) = context.dataStore.edit { it[KEY_USERNAME] = name }
@@ -42,6 +48,10 @@ class PreferencesRepository(private val context: Context) {
     suspend fun saveLastRunId(id: Long) = context.dataStore.edit { it[KEY_LAST_RUN_ID] = id }
     suspend fun setThemeMode(mode: String) = context.dataStore.edit { it[KEY_THEME] = mode }
     suspend fun saveBuildConfigJson(json: String) = context.dataStore.edit { it[KEY_BUILD_CONFIG] = json }
+    suspend fun saveDownloadedArtifactsJson(json: String) = context.dataStore.edit { it[KEY_DOWNLOADED_ARTIFACTS] = json }
+    suspend fun saveRemoteArtifactsJson(json: String) = context.dataStore.edit { it[KEY_REMOTE_ARTIFACTS] = json }
+    suspend fun savePendingAutoDownloadRunId(id: Long) = context.dataStore.edit { it[KEY_PENDING_AUTO_DOWNLOAD_RUN_ID] = id }
+    suspend fun clearPendingAutoDownloadRunId() = context.dataStore.edit { it.remove(KEY_PENDING_AUTO_DOWNLOAD_RUN_ID) }
 
     suspend fun clearAuth() = context.dataStore.edit {
         it.remove(KEY_ACCESS_TOKEN)
@@ -49,5 +59,7 @@ class PreferencesRepository(private val context: Context) {
         it.remove(KEY_AVATAR_URL)
         it.remove(KEY_FORK_REPO_NAME)
         it.remove(KEY_LAST_RUN_ID)
+        it.remove(KEY_REMOTE_ARTIFACTS)
+        it.remove(KEY_PENDING_AUTO_DOWNLOAD_RUN_ID)
     }
 }

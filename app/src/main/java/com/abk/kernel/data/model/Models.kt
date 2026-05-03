@@ -113,6 +113,57 @@ data class Artifact(
     @SerializedName("created_at") val createdAt: String
 )
 
+data class BuildArtifact(
+    val id: Long,
+    val name: String,
+    val sizeInBytes: Long,
+    val archiveDownloadUrl: String,
+    val expired: Boolean,
+    val createdAt: String,
+    val runId: Long,
+    val runTitle: String,
+    val runNumber: Int,
+    val runCreatedAt: String,
+    val runHtmlUrl: String = ""
+)
+
+fun Artifact.withRun(run: WorkflowRun): BuildArtifact = BuildArtifact(
+    id = id,
+    name = name,
+    sizeInBytes = sizeInBytes,
+    archiveDownloadUrl = archiveDownloadUrl,
+    expired = expired,
+    createdAt = createdAt,
+    runId = run.id,
+    runTitle = run.displayTitle ?: run.name ?: "#${run.runNumber}",
+    runNumber = run.runNumber,
+    runCreatedAt = run.createdAt,
+    runHtmlUrl = run.htmlUrl
+)
+
+fun BuildArtifact.toArtifact(): Artifact = Artifact(
+    id = id,
+    name = name,
+    sizeInBytes = sizeInBytes,
+    archiveDownloadUrl = archiveDownloadUrl,
+    expired = expired,
+    createdAt = createdAt
+)
+
+fun BuildArtifact.toWorkflowRun(): WorkflowRun = WorkflowRun(
+    id = runId,
+    name = runTitle,
+    status = "completed",
+    conclusion = "success",
+    htmlUrl = runHtmlUrl,
+    createdAt = runCreatedAt,
+    updatedAt = runCreatedAt,
+    runNumber = runNumber,
+    workflowId = 0L,
+    headBranch = null,
+    displayTitle = runTitle
+)
+
 data class ArtifactsResponse(
     @SerializedName("total_count") val totalCount: Int,
     val artifacts: List<Artifact>

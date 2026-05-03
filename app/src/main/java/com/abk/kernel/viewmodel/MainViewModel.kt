@@ -19,9 +19,11 @@ import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.NotificationUtils
 import com.abk.kernel.utils.RootUtils
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.File
 
 // ── UI State ─────────────────────────────────────────────────────────────────
 
@@ -51,9 +53,10 @@ data class MainUiState(
     val recommendedBuildConfig: KernelBuildConfig? = null,
     // Download
     val downloadedArtifacts: List<DownloadedArtifact> = emptyList(),
-    val artifacts: List<Artifact> = emptyList(),
+    val artifacts: List<BuildArtifact> = emptyList(),
     val isDownloading: Boolean = false,
     val downloadProgress: Map<Long, Int> = emptyMap(),
+    val pendingAutoDownloadRunId: Long = -1L,
     // Settings
     val autoDownload: Boolean = true,
     val notifyBuild: Boolean = true,
@@ -86,7 +89,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     else -> BuildStatus.IDLE
                 }
                 _uiState.update { it.copy(buildStatus = bs, currentRun = run, buildProgress = progress) }
-                if (bs == BuildStatus.SUCCESS && _uiState.value.autoDownload) {
+                if (bs == BuildStatus.SUCCESS) {
                     loadArtifacts(run.id, autoDownload = true)
                 }
             } catch (_: Exception) {}
@@ -163,6 +166,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             _uiState.update { it.copy(buildConfig = config) }
                         }
                 }
+            }
+        }
+        viewModelScope.launch {
+            prefs.downloadedArtifactsJson.collect { json ->
+                val restored = parseDownloadedArtifacts(json)
+                    .distinctBy { it.filePath }
+                    .filter { File(it.filePath).exists() }
+                _uiState.update { it.copy(downloadedArtifacts = restored) }
+            }
+        }
+        viewModelScope.launch {
+            prefs.remoteArtifactsJson.collect { json ->
+                if (json.isNullOrBlank()) {
+                    _uiState.update { it.copy(artifacts = emptyList()) }
+                } else {
+                    val restored = parseBuildArtifacts(json)
+                        .distinctBy { it.id }
+                        .sortedForDisplay()
+                    _uiState.update { it.copy(artifacts = mergeRemoteArtifacts(it.artifacts, restored)) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            prefs.pendingAutoDownloadRunId.collect { runId ->
+                _uiState.update { it.copy(pendingAutoDownloadRunId = runId) }
             }
         }
     }
@@ -458,6 +486,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (run != null) {
                         prefs.saveLastRunId(run.id)
+                        if (_uiState.value.autoDownload) {
+                            prefs.savePendingAutoDownloadRunId(run.id)
+                        } else {
+                            prefs.clearPendingAutoDownloadRunId()
+                        }
                         _uiState.update { it.copy(currentRun = run, buildStatus = BuildStatus.QUEUED) }
                         BuildMonitorService.startMonitoring(getApplication(), owner, repo, run.id)
                         return
@@ -477,8 +510,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val username = state.user?.login ?: return
         val repoName = state.forkRepo?.name ?: return
         viewModelScope.launch {
-            when (val r = github.listRecentRuns(username, repoName)) {
-                is Result.Success -> _uiState.update { it.copy(recentRuns = r.data) }
+            when (val r = github.listRecentRuns(username, repoName, perPage = 30)) {
+                is Result.Success -> {
+                    _uiState.update { it.copy(recentRuns = r.data) }
+                    refreshArtifactsForRuns(username, repoName, r.data)
+                }
                 else -> {}
             }
         }
@@ -489,23 +525,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val username = state.user?.login ?: return
         val repoName = state.forkRepo?.name ?: return
         viewModelScope.launch {
-            when (val r = github.listArtifacts(username, repoName, runId)) {
+            when (val r = listArtifactsWithRetry(username, repoName, runId, retryWhenEmpty = autoDownload)) {
                 is Result.Success -> {
-                    _uiState.update { it.copy(artifacts = r.data) }
-                    if (autoDownload) {
-                        r.data.filter { artifact ->
-                            !artifact.expired && DownloadUtils.shouldAutoDownload(artifact)
-                        }.forEach { downloadArtifact(it, run = state.currentRun) }
+                    val run = state.recentRuns.find { it.id == runId }
+                        ?: state.currentRun?.takeIf { it.id == runId }
+                        ?: when (val runResult = github.getWorkflowRun(username, repoName, runId)) {
+                            is Result.Success -> runResult.data
+                            else -> null
+                        }
+                    val buildArtifacts = r.data.map { artifact ->
+                        if (run != null) artifact.withRun(run) else artifact.toBuildArtifact(runId)
                     }
+                    val merged = mergeRemoteArtifacts(_uiState.value.artifacts, buildArtifacts)
+                    _uiState.update { it.copy(artifacts = merged) }
+                    prefs.saveRemoteArtifactsJson(gson.toJson(merged))
+                    maybeAutoDownloadRun(runId, buildArtifacts, autoDownload)
                 }
                 else -> {}
             }
         }
     }
 
+    private suspend fun listArtifactsWithRetry(
+        owner: String,
+        repoName: String,
+        runId: Long,
+        retryWhenEmpty: Boolean
+    ): Result<List<Artifact>> {
+        var result = github.listArtifacts(owner, repoName, runId)
+        if (!retryWhenEmpty) return result
+        repeat(3) {
+            when (val current = result) {
+                is Result.Success -> if (current.data.isNotEmpty()) return current
+                else -> {}
+            }
+            delay(5_000)
+            result = github.listArtifacts(owner, repoName, runId)
+        }
+        return result
+    }
+
     fun downloadArtifact(
-        artifact: com.abk.kernel.data.model.Artifact,
-        run: WorkflowRun? = _uiState.value.currentRun
+        artifact: BuildArtifact
     ) {
         viewModelScope.launch {
             val token = prefs.accessToken.first()
@@ -516,7 +577,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(isDownloading = true) }
             NotificationUtils.notifyDownloadProgress(getApplication(), 0, artifact.name)
             val results = DownloadUtils.downloadArtifact(
-                getApplication(), token, artifact, run
+                getApplication(), token, artifact.toArtifact(), artifact.toWorkflowRun()
             ) { pct ->
                 NotificationUtils.notifyDownloadProgress(getApplication(), pct, artifact.name)
                 _uiState.update { s ->
@@ -525,18 +586,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (results.isNotEmpty()) {
                 NotificationUtils.notifyDownloadDone(getApplication(), artifact.name)
+                val updated = (_uiState.value.downloadedArtifacts + results)
+                    .distinctBy { it.filePath }
+                    .sortedDownloadedForDisplay()
                 _uiState.update { s ->
                     s.copy(
                         isDownloading = false,
-                        downloadedArtifacts = (s.downloadedArtifacts + results)
-                            .distinctBy { it.filePath },
+                        downloadedArtifacts = updated,
                         downloadProgress = s.downloadProgress - artifact.id
                     )
                 }
+                prefs.saveDownloadedArtifactsJson(gson.toJson(updated))
             } else {
                 _uiState.update { it.copy(isDownloading = false, error = "下载失败: ${artifact.name}") }
             }
         }
+    }
+
+    private suspend fun refreshArtifactsForRuns(
+        owner: String,
+        repoName: String,
+        runs: List<WorkflowRun>
+    ) {
+        val completedRuns = runs
+            .filter { it.status == "completed" }
+            .take(MAX_REMOTE_ARTIFACT_RUNS)
+        if (completedRuns.isEmpty()) return
+
+        val collected = completedRuns.flatMap { run ->
+            when (val artifacts = github.listArtifacts(owner, repoName, run.id)) {
+                is Result.Success -> artifacts.data.map { it.withRun(run) }
+                else -> emptyList()
+            }
+        }
+        val merged = mergeRemoteArtifacts(_uiState.value.artifacts, collected)
+        _uiState.update { it.copy(artifacts = merged) }
+        prefs.saveRemoteArtifactsJson(gson.toJson(merged))
+
+        val pendingRunId = prefs.pendingAutoDownloadRunId.first()
+        if (pendingRunId > 0L && completedRuns.any { it.id == pendingRunId }) {
+            maybeAutoDownloadRun(
+                pendingRunId,
+                merged.filter { it.runId == pendingRunId },
+                requestedByMonitor = true
+            )
+        }
+    }
+
+    private suspend fun maybeAutoDownloadRun(
+        runId: Long,
+        artifacts: List<BuildArtifact>,
+        requestedByMonitor: Boolean
+    ) {
+        if (!requestedByMonitor || !_uiState.value.autoDownload) return
+        if (prefs.pendingAutoDownloadRunId.first() != runId) return
+        if (artifacts.isEmpty()) return
+
+        val targets = artifacts
+            .filter { !it.expired && DownloadUtils.shouldAutoDownload(it) }
+            .filterNot { candidate ->
+                _uiState.value.downloadedArtifacts.any {
+                    it.runId == candidate.runId && it.filePath.contains("/${candidate.name}/")
+                }
+            }
+
+        if (targets.isEmpty()) {
+            prefs.clearPendingAutoDownloadRunId()
+            return
+        }
+        prefs.clearPendingAutoDownloadRunId()
+        targets.forEach { downloadArtifact(it) }
     }
 
     private fun openActionsPage(repo: GitHubRepo) {
@@ -548,13 +667,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Settings ──────────────────────────────────────────────────────────
 
-    fun setAutoDownload(v: Boolean) = viewModelScope.launch { prefs.setAutoDownload(v) }
+    fun setAutoDownload(v: Boolean) = viewModelScope.launch {
+        prefs.setAutoDownload(v)
+        if (!v) prefs.clearPendingAutoDownloadRunId()
+    }
     fun setNotifyBuild(v: Boolean) = viewModelScope.launch { prefs.setNotifyBuild(v) }
     fun setThemeMode(mode: String) = viewModelScope.launch { prefs.setThemeMode(mode) }
     fun updateBuildConfig(config: KernelBuildConfig) {
         hasSavedBuildConfig = true
         _uiState.update { it.copy(buildConfig = config) }
         viewModelScope.launch { prefs.saveBuildConfigJson(gson.toJson(config)) }
+    }
+
+    private fun parseDownloadedArtifacts(json: String?): List<DownloadedArtifact> {
+        if (json.isNullOrBlank()) return emptyList()
+        return runCatching<List<DownloadedArtifact>> {
+            val type = object : TypeToken<List<DownloadedArtifact>>() {}.type
+            gson.fromJson<List<DownloadedArtifact>>(json, type).orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseBuildArtifacts(json: String?): List<BuildArtifact> {
+        if (json.isNullOrBlank()) return emptyList()
+        return runCatching<List<BuildArtifact>> {
+            val type = object : TypeToken<List<BuildArtifact>>() {}.type
+            gson.fromJson<List<BuildArtifact>>(json, type).orEmpty()
+        }.getOrDefault(emptyList())
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
@@ -692,6 +830,47 @@ private fun KernelBuildConfig.toInputMap(): Map<String, String> = mapOf(
     "zram_extra_algos" to zramExtraAlgos,
     "kpm_password" to kpmPassword
 )
+
+private const val MAX_REMOTE_ARTIFACT_RUNS = 30
+private const val MAX_PERSISTED_REMOTE_ARTIFACTS = 240
+
+private fun Artifact.toBuildArtifact(runId: Long): BuildArtifact = BuildArtifact(
+    id = id,
+    name = name,
+    sizeInBytes = sizeInBytes,
+    archiveDownloadUrl = archiveDownloadUrl,
+    expired = expired,
+    createdAt = createdAt,
+    runId = runId,
+    runTitle = "工作流 #$runId",
+    runNumber = 0,
+    runCreatedAt = createdAt
+)
+
+private fun mergeRemoteArtifacts(
+    existing: List<BuildArtifact>,
+    incoming: List<BuildArtifact>
+): List<BuildArtifact> {
+    val incomingRunIds = incoming.map { it.runId }.toSet()
+    return (incoming + existing.filterNot { it.runId in incomingRunIds })
+        .distinctBy { it.id }
+        .sortedForDisplay()
+        .take(MAX_PERSISTED_REMOTE_ARTIFACTS)
+}
+
+private fun List<BuildArtifact>.sortedForDisplay(): List<BuildArtifact> =
+    sortedWith(
+        compareByDescending<BuildArtifact> { it.runNumber }
+            .thenByDescending { it.runId }
+            .thenBy { it.name }
+    )
+
+private fun List<DownloadedArtifact>.sortedDownloadedForDisplay(): List<DownloadedArtifact> =
+    sortedWith(
+        compareByDescending<DownloadedArtifact> { it.runNumber }
+            .thenByDescending { it.runId }
+            .thenBy { it.name }
+    )
 
 private data class Quintuple<A, B, C, D, E>(val a: A, val b: B, val c: C, val d: D, val e: E)
 

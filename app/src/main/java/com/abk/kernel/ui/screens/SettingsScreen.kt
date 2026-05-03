@@ -99,7 +99,7 @@ fun SettingsScreen(vm: MainViewModel) {
                 SwitchSettingsItem(
                     icon = Icons.Default.Download,
                     title = stringResource(R.string.settings_auto_download),
-                    subtitle = "构建成功后自动下载所有产物",
+                    subtitle = "仅对下一次新提交的构建生效，关闭后不会自动下载",
                     checked = state.autoDownload,
                     onCheckedChange = { vm.setAutoDownload(it) }
                 )

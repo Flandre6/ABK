@@ -7,8 +7,10 @@ import androidx.core.content.FileProvider
 import com.abk.kernel.data.model.Artifact
 import com.abk.kernel.data.model.ArtifactCategory
 import com.abk.kernel.data.model.ArtifactType
+import com.abk.kernel.data.model.BuildArtifact
 import com.abk.kernel.data.model.DownloadedArtifact
 import com.abk.kernel.data.model.WorkflowRun
+import com.abk.kernel.data.model.toArtifact
 import com.abk.kernel.data.model.toArtifactCategory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,14 +30,22 @@ object DownloadUtils {
         val lower = name.lowercase()
         return when {
             lower.endsWith(".img") && (lower.contains("boot") || lower.contains("kernel")) -> ArtifactType.KERNEL_IMG
-            lower.endsWith(".zip") && (lower.contains("anykernel") || lower.contains("ak3")) -> ArtifactType.ANYKERNEL3
+            lower.contains("boot-img") || lower.contains("boot_img") || lower.contains("kernel-img") -> ArtifactType.KERNEL_IMG
+            lower.contains("anykernel") || lower.contains("ak3") -> ArtifactType.ANYKERNEL3
             lower.endsWith(".zip") && isLikelyModuleZipName(lower) -> ArtifactType.SUSFS_MODULE
+            isLikelyModuleZipName(lower) && !lower.contains("anykernel") -> ArtifactType.SUSFS_MODULE
             lower.endsWith(".apk") && (
                 lower.contains("manager") ||
                     lower.contains("kernelsu") ||
                     lower.contains("ksu") ||
                     lower.contains("suki")
                 ) -> ArtifactType.KSU_MANAGER
+            lower.contains("manager") && (
+                lower.contains("kernelsu") ||
+                    lower.contains("ksu") ||
+                    lower.contains("suki")
+                ) -> ArtifactType.KSU_MANAGER
+            lower.contains("sukisu-ultra") || lower.contains("sukisu_ultra") -> ArtifactType.KSU_MANAGER
             else -> ArtifactType.OTHER
         }
     }
@@ -65,6 +75,8 @@ object DownloadUtils {
             null -> false
         }
     }
+
+    fun shouldAutoDownload(artifact: BuildArtifact): Boolean = shouldAutoDownload(artifact.toArtifact())
 
     private fun isLikelySupportedManager(name: String): Boolean {
         val abi = android.os.Build.SUPPORTED_ABIS.joinToString(" ").lowercase(Locale.ROOT)

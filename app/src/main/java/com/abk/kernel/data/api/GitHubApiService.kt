@@ -91,7 +91,8 @@ interface GitHubApiService {
     suspend fun listArtifacts(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
-        @Path("run_id") runId: Long
+        @Path("run_id") runId: Long,
+        @Query("per_page") perPage: Int = 100
     ): Response<ArtifactsResponse>
 
     @Streaming
