@@ -15,6 +15,7 @@ import com.abk.kernel.data.repository.GitHubRepository
 import com.abk.kernel.data.repository.PreferencesRepository
 import com.abk.kernel.data.repository.Result
 import com.abk.kernel.utils.BuildMonitorService
+import com.abk.kernel.utils.BuildProgressUtils
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.NotificationUtils
 import com.abk.kernel.utils.RootUtils
@@ -810,8 +811,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (val run = github.getWorkflowRun(owner, repoName, runId)) {
                 is Result.Success -> {
                     val data = run.data
-                    if (data.status == "completed") return data
-                    val progress = ((attempt + 1) * 49 / MIRROR_WORKFLOW_MAX_POLLS).coerceIn(1, 49)
+                    if (data.status == "completed") {
+                        markMirrorProgress(artifactId, 50)
+                        return data
+                    }
+                    val progress = when (val jobs = github.listRunJobs(owner, repoName, runId)) {
+                        is Result.Success -> {
+                            val stepProgress = BuildProgressUtils.from(data, jobs.data).percent
+                            (stepProgress / 2).coerceIn(
+                                if (data.status in setOf("queued", "waiting", "requested", "pending")) 0 else 1,
+                                49
+                            )
+                        }
+                        else -> if (data.status in setOf("queued", "waiting", "requested", "pending")) 0 else 1
+                    }
                     markMirrorProgress(artifactId, progress)
                 }
                 is Result.Error -> {
