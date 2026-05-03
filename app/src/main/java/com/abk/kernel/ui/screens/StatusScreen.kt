@@ -38,10 +38,11 @@ fun StatusScreen(vm: MainViewModel) {
     LaunchedEffect(Unit) { vm.loadRecentRuns() }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
-                title = stringResource(R.string.status_title),
-                icon = Icons.Default.Info
+                title = stringResource(R.string.app_name),
+                icon = Icons.Default.PowerSettingsNew
             )
         }
     ) { padding ->
@@ -50,17 +51,18 @@ fun StatusScreen(vm: MainViewModel) {
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             val ksuVersion = remember(state.rootGranted) { RootUtils.getKsuVersion() }
             val kernelVersion = remember(state.rootGranted) { RootUtils.getKernelVersion() }
-            val buildColor = buildStatusColor(state.buildStatus)
 
             ExpressiveHeroCard(
-                title = state.user?.login?.let { "$it 的 ABK 控制台" } ?: "ABK 控制台",
-                subtitle = "把 Root、GitHub、Fork 和构建进度集中在一个状态面板中。",
-                icon = Icons.Default.Dashboard,
+                title = if (state.rootGranted) "工作中" else "等待授权",
+                subtitle = "版本：${state.currentRun?.runNumber ?: "ABK"}",
+                icon = if (state.rootGranted) Icons.Default.CheckCircleOutline else Icons.Default.LockOpen,
+                containerColor = if (state.rootGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 badge = {
                     ExpressiveStatusChip(
                         label = if (state.rootGranted) "Root 已授权" else "Root 未授权",
@@ -84,9 +86,9 @@ fun StatusScreen(vm: MainViewModel) {
 
             ExpressiveSectionCard(
                 title = stringResource(R.string.status_build),
-                subtitle = "通知栏与应用内进度同步，失败时可直接跳转到 GitHub 日志。",
+                subtitle = "通知栏与应用内进度同步",
                 icon = Icons.Default.RunCircle,
-                containerColor = buildColor.copy(alpha = 0.12f)
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
             ) {
                 when (state.buildStatus) {
                     BuildStatus.IDLE -> StatusRow(Icons.Default.HourglassEmpty, "暂无进行中的构建", false)
@@ -243,13 +245,14 @@ private fun StatusMetricCard(
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = animatedColor.copy(alpha = 0.13f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Icon(icon, null, tint = animatedColor, modifier = Modifier.size(26.dp))
             Column {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                Text(label, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

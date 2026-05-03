@@ -67,10 +67,11 @@ fun BuildScreen(vm: MainViewModel) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             ExpressiveTopBar(
                 title = stringResource(R.string.build_title),
-                icon = Icons.Default.Memory
+                icon = Icons.Default.MoreVert
             )
         }
     ) { padding ->
@@ -79,7 +80,7 @@ fun BuildScreen(vm: MainViewModel) {
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             BuildPlanHero(config, recommended, state.buildStatus)
@@ -248,13 +249,17 @@ fun BuildScreen(vm: MainViewModel) {
                 enabled = !state.isLoading && state.buildStatus !in listOf(
                     BuildStatus.QUEUED, BuildStatus.IN_PROGRESS
                 ),
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth().height(60.dp)
+                shape = RoundedCornerShape(30.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                modifier = Modifier.fillMaxWidth().height(64.dp)
             ) {
                 if (state.isLoading) {
                     CircularProgressIndicator(
                         Modifier.size(20.dp), strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 } else {
                     Icon(Icons.Default.RocketLaunch, null)
@@ -299,7 +304,7 @@ private fun BuildPlanHero(
 
     ExpressiveHeroCard(
         title = "${config.kernelVersion}.${config.subLevel} · ${config.androidVersion.removePrefix("android").let { "Android $it" }}",
-        subtitle = "以当前配置触发 GitHub Actions，完成后自动整理 img、AK3、管理器和 SUSFS 模块。",
+        subtitle = "触发 GitHub Actions 并自动整理 img、AK3、管理器和 SUSFS 模块。",
         icon = Icons.Default.RocketLaunch,
         containerColor = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -372,7 +377,8 @@ private fun BuildProgressCard(progress: BuildProgress) {
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
