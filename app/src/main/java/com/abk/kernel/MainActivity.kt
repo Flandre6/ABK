@@ -97,7 +97,7 @@ private fun AbkMainScaffold(vm: MainViewModel) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .height(104.dp),
+                    .height(82.dp),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
                 tonalElevation = 6.dp,
                 shadowElevation = 0.dp
@@ -105,7 +105,7 @@ private fun AbkMainScaffold(vm: MainViewModel) {
                 NavigationBar(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
-                    modifier = Modifier.padding(horizontal = 18.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp)
                 ) {
                     AbkTab.entries.forEach { tab ->
                         NavigationBarItem(
@@ -127,10 +127,15 @@ private fun AbkMainScaffold(vm: MainViewModel) {
                                         AbkTab.Settings -> Icons.Default.Settings
                                     },
                                     contentDescription = tab.label,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             },
-                            label = { Text(tab.label) }
+                            label = {
+                                Text(
+                                    text = tab.label,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
                         )
                     }
                 }
