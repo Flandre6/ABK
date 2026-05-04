@@ -1,8 +1,9 @@
 package com.abk.kernel.utils
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Environment
 import androidx.core.content.FileProvider
 import com.abk.kernel.data.model.Artifact
@@ -261,22 +262,7 @@ object DownloadUtils {
             val uri = FileProvider.getUriForFile(
                 context, "${context.packageName}.fileprovider", file
             )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeTypeFor(file))
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val chooser = Intent.createChooser(intent, "打开文件").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            val canHandle = intent.resolveActivity(context.packageManager) != null ||
-                chooser.resolveActivity(context.packageManager) != null
-            if (canHandle) {
-                context.grantUriPermissionForViewers(uri, intent)
-                context.startActivity(chooser)
-            }
-            canHandle
+            context.startActivityChooser(buildViewIntent(context, uri, "*/*", file.name), "打开文件")
         }.getOrDefault(false)
     }
 
@@ -287,34 +273,50 @@ object DownloadUtils {
             val uri = FileProvider.getUriForFile(
                 context, "${context.packageName}.fileprovider", file
             )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
+            val viewIntent = buildViewIntent(context, uri, "application/vnd.android.package-archive", file.name)
+            val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+                clipData = ClipData.newUri(context.contentResolver, file.name, uri)
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val canHandle = intent.resolveActivity(context.packageManager) != null
-            if (canHandle) {
-                context.grantUriPermissionForViewers(uri, intent)
-                context.startActivity(intent)
-            }
-            canHandle
+            context.startActivitySafely(viewIntent) || context.startActivitySafely(installIntent)
         }.getOrDefault(false)
     }
 
-    private fun mimeTypeFor(file: File): String = when (file.extension.lowercase(Locale.ROOT)) {
-        "apk" -> "application/vnd.android.package-archive"
-        "zip" -> "application/zip"
-        "img" -> "application/octet-stream"
-        "txt", "log" -> "text/plain"
-        else -> "application/octet-stream"
+    private fun Context.startActivityChooser(intent: Intent, title: String): Boolean {
+        val chooser = Intent.createChooser(intent, title).apply {
+            clipData = intent.clipData
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return startActivitySafely(chooser)
     }
 
-    private fun Context.grantUriPermissionForViewers(uri: android.net.Uri, intent: Intent) {
-        val flags = PackageManager.MATCH_DEFAULT_ONLY
-        packageManager.queryIntentActivities(intent, flags).forEach { resolveInfo ->
-            grantUriPermission(resolveInfo.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    private fun Context.startActivitySafely(intent: Intent): Boolean {
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: SecurityException) {
+            false
         }
     }
+
+    private fun buildViewIntent(
+        context: Context,
+        uri: android.net.Uri,
+        mimeType: String,
+        label: String
+    ): Intent =
+        Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            clipData = ClipData.newUri(context.contentResolver, label, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
 
     fun formatSize(bytes: Long): String {
         return when {
