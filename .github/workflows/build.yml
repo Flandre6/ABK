@@ -1111,7 +1111,9 @@ jobs:
         if: inputs.use_ddk
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
+          echo "应用 Xingguang DDK patch 栈并启用内建 LSM"
           bash "$ZZH_PATCHES/ddk/setup.sh"
+          test -f common/include/linux/xingguang_ddk.h
           grep -q '^CONFIG_XINGGUANG_DDK=y$' "$DEFCONFIG" || echo "CONFIG_XINGGUANG_DDK=y" >> "$DEFCONFIG"
 
       - name: 应用 Re-Kernel

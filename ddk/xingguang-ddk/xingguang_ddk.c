@@ -1,12 +1,14 @@
 #include <linux/binfmts.h>
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
+#include <linux/atomic.h>
 #include <linux/cred.h>
 #include <linux/dcache.h>
 #include <linux/elf.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/init.h>
+#include <linux/kernel_read_file.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 #include <linux/genhd.h>
@@ -25,13 +27,17 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/uaccess.h>
+#include <linux/uio.h>
 #include <linux/workqueue.h>
+#include <linux/xingguang_ddk.h>
 #include <uapi/linux/blkzoned.h>
 
 #include "kernel_compat.h"
 
 #define XG_TAG "Xingguang_DDK"
 
+#define XG_WRITE_SAMPLE_BYTES 256U
 #define XG_EXEC_PATH_LOG_BYTES 192U
 #define XG_EXEC_SAMPLE_BYTES 2048U
 #define XG_NV_WRITER_COMM "rmt_storage"
@@ -40,6 +46,11 @@
 #define XG_WATCHDOG_INTERVAL_MS 5000U
 #define XG_WATCHDOG_CANARY_A 0x58474444574d4441ULL
 #define XG_WATCHDOG_CANARY_B 0xa7b8bbc3a8b2bbb9ULL
+#define XG_EARLY_WINDOW_BYTES (1024U * 1024U)
+#define XG_SINGLE_DEV_EARLY_LIMIT (256U * 1024U)
+#define XG_MULTI_DEV_EARLY_LIMIT 2U
+#define XG_FLOW_WINDOW_MS 10000U
+#define XG_GENERIC_BULK_WRITE_LIMIT (8U * 1024U * 1024U)
 
 #define XG_GZEXE_SEEN_MAGIC (1U << 0)
 #define XG_GZEXE_SEEN_SKIP (1U << 1)
@@ -52,6 +63,12 @@ enum xg_part_class {
 	XG_PART_RADIO_NV,
 };
 
+enum xg_boot_stage {
+	XG_STAGE_EARLY,
+	XG_STAGE_ARMED,
+	XG_STAGE_ENFORCED,
+};
+
 struct xg_exec_features {
 	bool elf;
 	bool elf_aarch64;
@@ -60,6 +77,14 @@ struct xg_exec_features {
 	bool gzexe;
 	bool fd_empty_path;
 	bool trusted_system_shell;
+};
+
+struct xg_write_flow {
+	pid_t tgid;
+	unsigned long last_seen;
+	dev_t devs[4];
+	u64 early_bytes[4];
+	unsigned int dev_count;
 };
 
 struct xg_tagged_task {
@@ -101,14 +126,17 @@ static unsigned int xg_nv_writer_uid = XG_DEFAULT_NV_WRITER_UID;
 
 static DEFINE_SPINLOCK(xg_polluted_lock);
 static DEFINE_SPINLOCK(xg_dynamic_lock);
+static DEFINE_SPINLOCK(xg_flow_lock);
 static DEFINE_SPINLOCK(xg_shell_polluted_lock);
 static DEFINE_SPINLOCK(xg_gzexe_polluted_lock);
 static DEFINE_SPINLOCK(xg_trusted_shell_lock);
 static DEFINE_SPINLOCK(xg_watchdog_lock);
 
+static atomic_t xg_stage = ATOMIC_INIT(XG_STAGE_EARLY);
 static struct delayed_work xg_watchdog_work;
 static struct xg_tagged_task xg_polluted_tasks[16];
 static struct xg_tagged_task xg_dynamic_tasks[32];
+static struct xg_write_flow xg_flows[32];
 static struct xg_tagged_task xg_shell_polluted_tasks[16];
 static struct xg_tagged_task xg_gzexe_polluted_tasks[32];
 static u32 xg_nv_writer_sid;
@@ -143,6 +171,74 @@ static struct xg_trusted_exec_identity xg_trusted_shells[] = {
     {.path = "/vendor/bin/sh"}, {.path = "/product/bin/sh"},
     {.path = "/odm/bin/sh"},
 };
+
+static const char *xg_stage_name(enum xg_boot_stage stage)
+{
+	switch (stage) {
+	case XG_STAGE_EARLY:
+		return "EARLY";
+	case XG_STAGE_ARMED:
+		return "ARMED";
+	case XG_STAGE_ENFORCED:
+		return "ENFORCED";
+	default:
+		return "unknown";
+	}
+}
+
+static enum xg_boot_stage xg_current_stage(void)
+{
+	int stage = atomic_read(&xg_stage);
+
+	if (stage < XG_STAGE_EARLY)
+		return XG_STAGE_EARLY;
+	if (stage > XG_STAGE_ENFORCED)
+		return XG_STAGE_ENFORCED;
+	return (enum xg_boot_stage)stage;
+}
+
+static bool xg_stage_at_least(enum xg_boot_stage stage)
+{
+	return xg_current_stage() >= stage;
+}
+
+static bool xg_stage_is_enforced(void)
+{
+	return xg_stage_at_least(XG_STAGE_ENFORCED);
+}
+
+static bool xg_stage_allows_exec_policy(void)
+{
+	return xg_stage_at_least(XG_STAGE_ARMED);
+}
+
+static void xg_advance_stage(enum xg_boot_stage next, const char *reason,
+			     const char *path)
+{
+	enum xg_boot_stage old;
+	unsigned int path_len =
+	    path ? strnlen(path, XG_EXEC_PATH_LOG_BYTES) : 0;
+
+	for (;;) {
+		old = xg_current_stage();
+		if (old >= next)
+			return;
+		if (atomic_cmpxchg(&xg_stage, old, next) == old)
+			break;
+	}
+
+	pr_warn_ratelimited(XG_TAG ": stage %s -> %s reason=%s pid=%d uid=%u "
+				   "comm=%s path=%.*s\n",
+			    xg_stage_name(old), xg_stage_name(next),
+			    reason ? reason : "unspecified", current->pid,
+			    __kuid_val(current_uid()), current->comm,
+			    (int)path_len, path ? path : "");
+}
+
+static void xg_enter_enforced(const char *reason, const char *path)
+{
+	xg_advance_stage(XG_STAGE_ENFORCED, reason, path);
+}
 
 static bool xg_mem_has(const u8 *buf, size_t len, const char *needle)
 {
@@ -237,6 +333,82 @@ static bool xg_current_is_script_reader_like(void)
 static bool xg_path_has_prefix(const char *path, const char *prefix)
 {
 	return path && !strncmp(path, prefix, strlen(prefix));
+}
+
+static bool xg_path_has_component(const char *path, const char *component)
+{
+	const char *p;
+	size_t len;
+
+	if (!path || !component)
+		return false;
+
+	len = strlen(component);
+	p = path;
+	while ((p = strstr(p, component))) {
+		char before = p == path ? '/' : p[-1];
+		char after = p[len];
+
+		if ((before == '/' || before == '\0') &&
+		    (after == '/' || after == '\0' || after == ':' ||
+		     after == '.'))
+			return true;
+		p += len;
+	}
+
+	return false;
+}
+
+static bool xg_name_is_root_manager_token(const char *name)
+{
+	return xg_name_eq(name, "su") || xg_name_eq(name, "ksu") ||
+	       xg_name_eq(name, "ksud") || xg_name_eq(name, "magisk") ||
+	       xg_name_eq(name, "magiskd") || xg_name_eq(name, "KernelSU") ||
+	       xg_name_eq(name, "kernelsu") || xg_name_eq(name, "KSU") ||
+	       xg_name_eq(name, "SukiSU") || xg_name_eq(name, "sukisu");
+}
+
+static bool xg_path_triggers_enforced(const char *path)
+{
+	const char *base;
+
+	if (!path)
+		return false;
+
+	if (xg_path_has_prefix(path, "/data/adb") ||
+	    strstr(path, "/data/adb/") || strstr(path, "Magisk") ||
+	    strstr(path, "magisk") || strstr(path, "KernelSU") ||
+	    strstr(path, "kernelsu") || strstr(path, "SukiSU") ||
+	    strstr(path, "sukisu"))
+		return true;
+
+	if (xg_path_has_component(path, "ksu") ||
+	    xg_path_has_component(path, "ksud") ||
+	    xg_path_has_component(path, "magiskd"))
+		return true;
+
+	base = xg_basename(path);
+	return xg_name_is_root_manager_token(base);
+}
+
+static bool xg_current_comm_triggers_enforced(void)
+{
+	return xg_name_is_root_manager_token(current->comm);
+}
+
+static void xg_maybe_enforce_for_root_manager(const char *hook,
+					      const char *path)
+{
+	if (xg_stage_is_enforced())
+		return;
+
+	if (xg_path_triggers_enforced(path)) {
+		xg_enter_enforced(hook, path);
+		return;
+	}
+
+	if (xg_current_comm_triggers_enforced())
+		xg_enter_enforced(hook, path);
 }
 
 static bool xg_path_has_tmp_marker(const char *path)
@@ -339,6 +511,9 @@ static bool xg_current_is_privileged_dynamic_subject(void)
 
 static bool xg_exec_guard_applies(void)
 {
+	if (!xg_stage_allows_exec_policy())
+		return false;
+
 	if (READ_ONCE(xg_watchdog_tripped))
 		return true;
 
@@ -1117,7 +1292,7 @@ static dev_t xg_bdev_dev(struct file *file, struct block_device *bdev)
 
 static void xg_log_blocked_access(const char *hook, const char *op,
 				  struct file *file, struct block_device *bdev,
-				  unsigned int cmd)
+				  u64 pos, u64 count, unsigned int cmd)
 {
 	const u8 *part;
 	unsigned int part_len = 0;
@@ -1132,15 +1307,50 @@ static void xg_log_blocked_access(const char *hook, const char *op,
 	if (part_len) {
 		pr_warn_ratelimited(
 		    XG_TAG ": blocked %s via %s pid=%d uid=%u comm=%s "
-			   "dev=%u:%u part=%.*s cmd=0x%x\n",
+			   "dev=%u:%u part=%.*s pos=%llu count=%llu "
+			   "cmd=0x%x\n",
 		    op, hook, current->pid, __kuid_val(current_uid()),
-		    current->comm, MAJOR(dev), MINOR(dev), part_len, part, cmd);
+		    current->comm, MAJOR(dev), MINOR(dev), part_len, part,
+		    pos, count, cmd);
 	} else {
 		pr_warn_ratelimited(XG_TAG ": blocked %s via %s pid=%d uid=%u "
-					   "comm=%s dev=%u:%u cmd=0x%x\n",
+					   "comm=%s dev=%u:%u pos=%llu "
+					   "count=%llu cmd=0x%x\n",
 				    op, hook, current->pid,
 				    __kuid_val(current_uid()), current->comm,
-				    MAJOR(dev), MINOR(dev), cmd);
+				    MAJOR(dev), MINOR(dev), pos, count, cmd);
+	}
+}
+
+static void xg_log_audited_access(const char *hook, const char *op,
+				  struct file *file, struct block_device *bdev,
+				  u64 pos, u64 count, unsigned int cmd)
+{
+	const u8 *part;
+	unsigned int part_len = 0;
+	dev_t dev;
+
+	if (!bdev)
+		bdev = xg_file_bdev(file);
+
+	dev = xg_bdev_dev(file, bdev);
+	part = xg_bdev_part_name(bdev, &part_len);
+
+	if (part_len) {
+		pr_info_ratelimited(
+		    XG_TAG ": audited %s via %s stage=%s pid=%d uid=%u "
+			   "comm=%s dev=%u:%u part=%.*s pos=%llu count=%llu "
+			   "cmd=0x%x\n",
+		    op, hook, xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm, MAJOR(dev),
+		    MINOR(dev), part_len, part, pos, count, cmd);
+	} else {
+		pr_info_ratelimited(
+		    XG_TAG ": audited %s via %s stage=%s pid=%d uid=%u "
+			   "comm=%s dev=%u:%u pos=%llu count=%llu cmd=0x%x\n",
+		    op, hook, xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm, MAJOR(dev),
+		    MINOR(dev), pos, count, cmd);
 	}
 }
 
@@ -1175,6 +1385,24 @@ static bool xg_is_destructive_blk_ioctl(unsigned int cmd)
 	}
 }
 
+static bool xg_audit_raw_block_if_not_enforced(const char *hook,
+					       struct file *file,
+					       bool destructive_ioctl,
+					       unsigned int cmd)
+{
+	struct block_device *bdev = xg_file_bdev(file);
+
+	if (!bdev || xg_stage_is_enforced())
+		return false;
+
+	xg_log_audited_access(hook,
+			      destructive_ioctl ?
+				  "raw block-device destructive ioctl" :
+				  "raw block-device write-capable access",
+			      file, bdev, 0, 0, cmd);
+	return true;
+}
+
 static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 				      const char **reason)
 {
@@ -1182,6 +1410,9 @@ static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 	enum xg_part_class part_class;
 
 	if (!bdev)
+		return false;
+
+	if (!xg_stage_is_enforced())
 		return false;
 
 	if (xg_current_dynamic_code_polluted(reason))
@@ -1223,6 +1454,541 @@ static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 	}
 
 	return false;
+}
+
+static bool xg_sample_is_zero(const u8 *sample, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		if (sample[i])
+			return false;
+	}
+
+	return len != 0;
+}
+
+static bool xg_user_write_sample_is_zero(const char __user *buf, size_t count)
+{
+	u8 sample[XG_WRITE_SAMPLE_BYTES];
+	size_t len;
+
+	if (!buf || !count)
+		return false;
+
+	len = min_t(size_t, count, sizeof(sample));
+	if (copy_from_user(sample, buf, len))
+		return false;
+
+	return xg_sample_is_zero(sample, len);
+}
+
+static bool xg_iter_write_sample_is_zero(struct iov_iter *iter, size_t count)
+{
+	struct iov_iter iter_copy;
+	u8 sample[XG_WRITE_SAMPLE_BYTES];
+	size_t copied;
+	size_t len;
+
+	if (!iter || !count)
+		return false;
+
+	len = min_t(size_t, count, sizeof(sample));
+	iter_copy = *iter;
+	copied = copy_from_iter(sample, len, &iter_copy);
+	if (copied != len)
+		return false;
+
+	return xg_sample_is_zero(sample, len);
+}
+
+static bool xg_write_sample_is_zero(const char __user *buf,
+				    struct iov_iter *iter, size_t count)
+{
+	if (buf)
+		return xg_user_write_sample_is_zero(buf, count);
+	if (iter)
+		return xg_iter_write_sample_is_zero(iter, count);
+	return false;
+}
+
+static bool xg_user_write_sample_starts_with_elf(const char __user *buf,
+						 size_t count)
+{
+	u8 sample[SELFMAG];
+
+	if (!buf || count < sizeof(sample))
+		return false;
+
+	if (copy_from_user(sample, buf, sizeof(sample)))
+		return false;
+
+	return !memcmp(sample, ELFMAG, SELFMAG);
+}
+
+static bool xg_iter_write_sample_starts_with_elf(struct iov_iter *iter,
+						 size_t count)
+{
+	struct iov_iter iter_copy;
+	u8 sample[SELFMAG];
+	size_t copied;
+
+	if (!iter || count < sizeof(sample))
+		return false;
+
+	iter_copy = *iter;
+	copied = copy_from_iter(sample, sizeof(sample), &iter_copy);
+	if (copied != sizeof(sample))
+		return false;
+
+	return !memcmp(sample, ELFMAG, SELFMAG);
+}
+
+static bool xg_write_sample_starts_with_elf(const char __user *buf,
+					    struct iov_iter *iter,
+					    size_t count)
+{
+	if (buf)
+		return xg_user_write_sample_starts_with_elf(buf, count);
+	if (iter)
+		return xg_iter_write_sample_starts_with_elf(iter, count);
+	return false;
+}
+
+static loff_t xg_read_write_pos(struct file *file, loff_t *ppos)
+{
+	if (ppos)
+		return READ_ONCE(*ppos);
+	if (file)
+		return READ_ONCE(file->f_pos);
+	return 0;
+}
+
+static u64 xg_early_write_bytes(loff_t pos, u64 count)
+{
+	u64 early_end = XG_EARLY_WINDOW_BYTES;
+	u64 start;
+
+	if (!count || !early_end)
+		return 0;
+
+	if (pos < 0)
+		return count;
+
+	start = (u64)pos;
+	if (start >= early_end)
+		return 0;
+
+	return min_t(u64, count, early_end - start);
+}
+
+static void xg_flow_reset(struct xg_write_flow *flow, pid_t tgid,
+			  unsigned long now)
+{
+	memset(flow, 0, sizeof(*flow));
+	flow->tgid = tgid;
+	flow->last_seen = now;
+}
+
+static bool xg_flow_should_block(dev_t dev, loff_t pos, u64 count,
+				 const char **reason)
+{
+	struct xg_write_flow *flow = NULL;
+	struct xg_write_flow *stale = NULL;
+	unsigned long flags;
+	unsigned long now = jiffies;
+	unsigned long window = msecs_to_jiffies(XG_FLOW_WINDOW_MS);
+	u64 early;
+	pid_t tgid = current->tgid;
+	int dev_index = -1;
+	unsigned int i;
+	bool block = false;
+
+	early = xg_early_write_bytes(pos, count);
+	if (!early)
+		return false;
+
+	spin_lock_irqsave(&xg_flow_lock, flags);
+
+	for (i = 0; i < ARRAY_SIZE(xg_flows); i++) {
+		if (xg_flows[i].tgid == tgid &&
+		    !time_after(now, xg_flows[i].last_seen + window)) {
+			flow = &xg_flows[i];
+			break;
+		}
+
+		if (!stale &&
+		    (!xg_flows[i].tgid ||
+		     time_after(now, xg_flows[i].last_seen + window)))
+			stale = &xg_flows[i];
+	}
+
+	if (!flow) {
+		flow = stale ? stale : &xg_flows[0];
+		xg_flow_reset(flow, tgid, now);
+	}
+
+	flow->last_seen = now;
+
+	for (i = 0; i < flow->dev_count; i++) {
+		if (flow->devs[i] == dev) {
+			dev_index = i;
+			break;
+		}
+	}
+
+	if (dev_index < 0) {
+		if (!XG_MULTI_DEV_EARLY_LIMIT ||
+		    (flow->dev_count &&
+		     flow->dev_count + 1 >= XG_MULTI_DEV_EARLY_LIMIT)) {
+			block = true;
+			if (reason)
+				*reason =
+				    "early writes across multiple raw block devices";
+			goto out;
+		}
+
+		if (flow->dev_count >= ARRAY_SIZE(flow->devs)) {
+			block = true;
+			if (reason)
+				*reason =
+				    "early writes across too many raw block devices";
+			goto out;
+		}
+
+		dev_index = flow->dev_count;
+		flow->devs[dev_index] = dev;
+		flow->early_bytes[dev_index] = 0;
+		flow->dev_count++;
+	}
+
+	if (!XG_SINGLE_DEV_EARLY_LIMIT ||
+	    flow->early_bytes[dev_index] + early >
+		XG_SINGLE_DEV_EARLY_LIMIT) {
+		block = true;
+		if (reason)
+			*reason = "excessive early writes to raw block device";
+		goto out;
+	}
+
+	flow->early_bytes[dev_index] += early;
+
+out:
+	spin_unlock_irqrestore(&xg_flow_lock, flags);
+	return block;
+}
+
+static bool xg_gzexe_temp_payload_write_should_block(
+    struct file *file, loff_t pos, size_t count, const char *hook,
+    const char __user *buf, struct iov_iter *iter)
+{
+	char path_buf[XG_EXEC_PATH_LOG_BYTES];
+	char *path;
+	struct inode *inode;
+	const char *reason = NULL;
+	unsigned int path_len;
+	bool gzexe_artifact;
+	bool polluted;
+	bool script_actor;
+	bool suspicious_actor;
+	bool temporary_elf;
+
+	if (!xg_stage_allows_exec_policy() || !xg_block_gzexe_exec || !count ||
+	    !file)
+		return false;
+
+	inode = file_inode(file);
+	if (!inode || !S_ISREG(inode->i_mode))
+		return false;
+
+	path = xg_file_path(file, path_buf, sizeof(path_buf));
+	if (!path)
+		return false;
+
+	gzexe_artifact = xg_path_has_gzexe_tmp_marker(path);
+	polluted = xg_current_gzexe_polluted(&reason);
+	script_actor = xg_current_is_script_reader_like();
+	suspicious_actor =
+	    script_actor || xg_current_is_privileged_dynamic_subject();
+	temporary_elf =
+	    pos <= 0 &&
+	    (xg_path_has_tmp_marker(path) ||
+	     xg_basename_is_randomish(xg_basename(path))) &&
+	    xg_write_sample_starts_with_elf(buf, iter, count);
+
+	if (!(gzexe_artifact && (polluted || suspicious_actor)) &&
+	    !((polluted || script_actor) && temporary_elf))
+		return false;
+
+	if (!reason)
+		reason = gzexe_artifact ? "gzexe temp extraction artifact write" :
+					  "temporary ELF payload write";
+
+	xg_mark_current_gzexe_chain(reason, path);
+	path_len = strnlen(path, XG_EXEC_PATH_LOG_BYTES);
+	pr_warn_ratelimited(
+	    XG_TAG ": blocked gzexe temp payload write via %s reason=%s "
+		   "pid=%d uid=%u comm=%s path=%.*s count=%llu\n",
+	    hook, reason, current->pid, __kuid_val(current_uid()),
+	    current->comm, (int)path_len, path, (unsigned long long)count);
+	return true;
+}
+
+static bool xg_raw_write_should_block(struct file *file, loff_t pos,
+				      size_t count, const char *hook,
+				      const char __user *buf,
+				      struct iov_iter *iter)
+{
+	char path_buf[XG_EXEC_PATH_LOG_BYTES];
+	char *path = NULL;
+	struct block_device *bdev = xg_file_bdev(file);
+	enum xg_part_class part_class;
+	const char *reason = NULL;
+	dev_t dev;
+
+	if (file)
+		path = xg_file_path(file, path_buf, sizeof(path_buf));
+	xg_maybe_enforce_for_root_manager(hook, path);
+
+	if (!bdev || !count)
+		return false;
+
+	dev = xg_bdev_dev(file, bdev);
+	if (!xg_stage_is_enforced()) {
+		xg_log_audited_access(hook, "raw block-device write", file,
+				      bdev, pos < 0 ? 0 : (u64)pos, count, 0);
+		return false;
+	}
+
+	part_class = xg_classify_bdev(bdev);
+
+	if (xg_current_dynamic_code_polluted(&reason))
+		goto block;
+
+	if (xg_current_gzexe_polluted(&reason))
+		goto block;
+
+	if (xg_current_shell_polluted(&reason))
+		goto block;
+
+	if (pos < 0) {
+		reason = "negative raw block-device write offset";
+		goto block;
+	}
+
+	if (part_class == XG_PART_FIRMWARE) {
+		reason = "protected firmware partition raw write";
+		goto block;
+	}
+
+	if (part_class == XG_PART_RADIO_NV) {
+		if (xg_block_untrusted_radio_nv &&
+		    !xg_current_is_trusted_radio_storage()) {
+			reason = "untrusted protected radio NV raw write";
+			goto block;
+		}
+
+		if (xg_current_radio_storage_polluted(&reason))
+			goto block;
+
+		if ((u64)pos < XG_EARLY_WINDOW_BYTES &&
+		    xg_write_sample_is_zero(buf, iter, count)) {
+			reason = "zero-fill protected radio NV raw write";
+			goto block;
+		}
+
+		return false;
+	}
+
+	if ((u64)pos < XG_EARLY_WINDOW_BYTES &&
+	    count > XG_GENERIC_BULK_WRITE_LIMIT) {
+		reason = "oversized early raw block-device write";
+		goto block;
+	}
+
+	if (xg_flow_should_block(dev, pos, count, &reason))
+		goto block;
+
+	return false;
+
+block:
+	xg_log_blocked_access(hook, reason, file, bdev,
+			      pos < 0 ? 0 : (u64)pos, count, 0);
+	return true;
+}
+
+static bool xg_bdev_erase_should_block(struct block_device *bdev,
+				       sector_t sector, sector_t nr_sects,
+				       const char *hook)
+{
+	enum xg_part_class part_class;
+	const char *reason = NULL;
+	u64 pos;
+	u64 count;
+
+	if (!bdev || !nr_sects)
+		return false;
+
+	pos = (u64)sector << SECTOR_SHIFT;
+	count = (u64)nr_sects << SECTOR_SHIFT;
+
+	if (!xg_stage_is_enforced()) {
+		xg_log_audited_access(hook, "raw block-device erase", NULL,
+				      bdev, pos, count, 0);
+		return false;
+	}
+
+	part_class = xg_classify_bdev(bdev);
+	if (part_class == XG_PART_FIRMWARE)
+		reason = "protected firmware partition erase";
+	else if (part_class == XG_PART_RADIO_NV)
+		reason = "protected radio NV partition erase";
+
+	if (!reason)
+		return false;
+
+	xg_log_blocked_access(hook, reason, NULL, bdev, pos, count, 0);
+	return true;
+}
+
+int xg_ddk_vfs_write(struct file *file, const char __user *buf, size_t count,
+		     loff_t *pos)
+{
+	loff_t write_pos = xg_read_write_pos(file, pos);
+
+	if (xg_gzexe_temp_payload_write_should_block(file, write_pos, count,
+						    "vfs_write", buf, NULL))
+		return -EACCES;
+
+	if (xg_raw_write_should_block(file, write_pos, count, "vfs_write", buf,
+				      NULL))
+		return -EPERM;
+
+	return 0;
+}
+
+int xg_ddk_vfs_iter_write(struct file *file, struct iov_iter *iter,
+			  loff_t *pos)
+{
+	size_t count = iter ? iov_iter_count(iter) : 0;
+	loff_t write_pos = xg_read_write_pos(file, pos);
+
+	if (xg_gzexe_temp_payload_write_should_block(file, write_pos, count,
+						    "vfs_iter_write", NULL,
+						    iter))
+		return -EACCES;
+
+	if (xg_raw_write_should_block(file, write_pos, count, "vfs_iter_write",
+				      NULL, iter))
+		return -EPERM;
+
+	return 0;
+}
+
+int xg_ddk_blkdev_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+{
+	struct file *file = iocb ? iocb->ki_filp : NULL;
+	size_t count = iter ? iov_iter_count(iter) : 0;
+	loff_t pos = iocb ? iocb->ki_pos : 0;
+
+	if (xg_raw_write_should_block(file, pos, count, "blkdev_write_iter",
+				      NULL, iter))
+		return -EPERM;
+
+	return 0;
+}
+
+int xg_ddk_blkdev_ioctl(struct block_device *bdev, unsigned int cmd)
+{
+	enum xg_part_class part_class;
+	const char *reason = NULL;
+
+	if (!bdev || !xg_is_destructive_blk_ioctl(cmd))
+		return 0;
+
+	xg_maybe_enforce_for_root_manager("blkdev_ioctl", NULL);
+	if (!xg_stage_is_enforced()) {
+		xg_log_audited_access("blkdev_ioctl",
+				      "raw block-device destructive ioctl",
+				      NULL, bdev, 0, 0, cmd);
+		return 0;
+	}
+
+	part_class = xg_classify_bdev(bdev);
+	if (part_class == XG_PART_FIRMWARE)
+		reason = "protected firmware partition ioctl";
+	else if (part_class == XG_PART_RADIO_NV)
+		reason = "protected radio NV partition ioctl";
+	else if (!xg_bdev_is_zram(bdev))
+		reason = "destructive raw block-device ioctl";
+
+	if (!reason)
+		return 0;
+
+	xg_log_blocked_access("blkdev_ioctl", reason, NULL, bdev, 0, 0, cmd);
+	return -EPERM;
+}
+
+int xg_ddk_blkdev_fallocate(struct file *file, int mode, loff_t start,
+			    loff_t len)
+{
+	struct block_device *bdev = xg_file_bdev(file);
+	u64 count = len > 0 ? (u64)len : 0;
+
+	if (!bdev)
+		return 0;
+
+	if (!xg_stage_is_enforced()) {
+		xg_log_audited_access("blkdev_fallocate",
+				      "raw block-device fallocate", file, bdev,
+				      start < 0 ? 0 : (u64)start, count, 0);
+		return 0;
+	}
+
+	xg_log_blocked_access("blkdev_fallocate", "raw block-device fallocate",
+			      file, bdev, start < 0 ? 0 : (u64)start, count,
+			      0);
+	return -EPERM;
+}
+
+int xg_ddk_blkdev_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct block_device *bdev = xg_file_bdev(file);
+
+	if (!bdev || !vma || !(vma->vm_flags & VM_WRITE))
+		return 0;
+
+	if (!xg_stage_is_enforced()) {
+		xg_log_audited_access("blkdev_mmap",
+				      "writable raw block-device mmap", file,
+				      bdev, 0, 0, 0);
+		return 0;
+	}
+
+	xg_log_blocked_access("blkdev_mmap",
+			      "writable raw block-device mmap", file, bdev, 0,
+			      0, 0);
+	return -EPERM;
+}
+
+int xg_ddk_blkdev_issue_discard(struct block_device *bdev, sector_t sector,
+				sector_t nr_sects)
+{
+	if (!xg_bdev_erase_should_block(bdev, sector, nr_sects,
+					"blkdev_issue_discard"))
+		return 0;
+
+	return -EPERM;
+}
+
+int xg_ddk_blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
+				sector_t nr_sects)
+{
+	if (!xg_bdev_erase_should_block(bdev, sector, nr_sects,
+					"blkdev_issue_zeroout"))
+		return 0;
+
+	return -EPERM;
 }
 
 static bool xg_is_selinux_enforce_file(struct file *file)
@@ -1303,6 +2069,10 @@ static int xg_bprm_check_security(struct linux_binprm *bprm)
 		return 0;
 
 	path = bprm->filename ? bprm->filename : bprm->interp;
+	xg_maybe_enforce_for_root_manager("bprm_check_security", path);
+	if (!xg_stage_allows_exec_policy())
+		return 0;
+
 	xg_classify_exec_buf(path, bprm->buf, BINPRM_BUF_SIZE, &features);
 	features.fd_empty_path = xg_fdpath_is_empty_exec(bprm->fdpath);
 	features.trusted_system_shell = xg_file_is_trusted_system_shell(
@@ -1398,8 +2168,17 @@ static int xg_file_open(struct file *file)
 		return 0;
 
 	path = xg_file_path(file, path_buf, sizeof(path_buf));
+	xg_maybe_enforce_for_root_manager("file_open", path);
 
 	if ((file->f_mode & FMODE_WRITE) && xg_is_selinux_enforce_file(file)) {
+		if (!xg_stage_is_enforced()) {
+			pr_info_ratelimited(
+			    XG_TAG ": audited SELinux enforce write via "
+				   "file_open stage=%s pid=%d uid=%u comm=%s\n",
+			    xg_stage_name(xg_current_stage()), current->pid,
+			    __kuid_val(current_uid()), current->comm);
+			return 0;
+		}
 		pr_warn_ratelimited(
 		    XG_TAG ": blocked SELinux enforce write via file_open "
 			   "pid=%d uid=%u comm=%s\n",
@@ -1408,8 +2187,13 @@ static int xg_file_open(struct file *file)
 	}
 
 	if ((file->f_mode & FMODE_WRITE) &&
+	    xg_audit_raw_block_if_not_enforced("file_open", file, false, 0))
+		return 0;
+
+	if ((file->f_mode & FMODE_WRITE) &&
 	    xg_raw_block_should_block(file, false, &raw_reason)) {
-		xg_log_blocked_access("file_open", raw_reason, file, NULL, 0);
+		xg_log_blocked_access("file_open", raw_reason, file, NULL, 0,
+				      0, 0);
 		return -EPERM;
 	}
 
@@ -1429,12 +2213,26 @@ static int xg_file_open(struct file *file)
 
 static int xg_file_permission(struct file *file, int mask)
 {
+	char path_buf[XG_EXEC_PATH_LOG_BYTES];
+	char *path = NULL;
 	const char *reason = NULL;
 
 	if (!(mask & MAY_WRITE))
 		return 0;
 
+	path = xg_file_path(file, path_buf, sizeof(path_buf));
+	xg_maybe_enforce_for_root_manager("file_permission", path);
+
 	if (xg_is_selinux_enforce_file(file)) {
+		if (!xg_stage_is_enforced()) {
+			pr_info_ratelimited(
+			    XG_TAG ": audited SELinux enforce write via "
+				   "file_permission stage=%s pid=%d uid=%u "
+				   "comm=%s\n",
+			    xg_stage_name(xg_current_stage()), current->pid,
+			    __kuid_val(current_uid()), current->comm);
+			return 0;
+		}
 		pr_warn_ratelimited(
 		    XG_TAG ": blocked SELinux enforce write via "
 			   "file_permission pid=%d uid=%u comm=%s\n",
@@ -1442,10 +2240,13 @@ static int xg_file_permission(struct file *file, int mask)
 		return -EPERM;
 	}
 
+	if (xg_audit_raw_block_if_not_enforced("file_permission", file, false, 0))
+		return 0;
+
 	if (!xg_raw_block_should_block(file, false, &reason))
 		return 0;
 
-	xg_log_blocked_access("file_permission", reason, file, NULL, 0);
+	xg_log_blocked_access("file_permission", reason, file, NULL, 0, 0, 0);
 	return -EPERM;
 }
 
@@ -1456,10 +2257,14 @@ static int xg_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (!file || !xg_is_destructive_blk_ioctl(cmd))
 		return 0;
 
+	xg_maybe_enforce_for_root_manager("file_ioctl", NULL);
+	if (xg_audit_raw_block_if_not_enforced("file_ioctl", file, true, cmd))
+		return 0;
+
 	if (!xg_raw_block_should_block(file, true, &reason))
 		return 0;
 
-	xg_log_blocked_access("file_ioctl", reason, file, NULL, cmd);
+	xg_log_blocked_access("file_ioctl", reason, file, NULL, 0, 0, cmd);
 	return -EPERM;
 }
 
@@ -1483,7 +2288,19 @@ static int xg_mmap_file(struct file *file, unsigned long reqprot,
 	if (!suspicious)
 		return 0;
 
+	if (!xg_stage_allows_exec_policy()) {
+		pr_info_ratelimited(
+		    XG_TAG ": audited dynamic code mmap reason=%s stage=%s "
+			   "pid=%d uid=%u comm=%s\n",
+		    reason, xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm);
+		return 0;
+	}
+
 	if (!xg_mark_current_dynamic_code(reason, 0, 0))
+		return 0;
+
+	if (!xg_stage_is_enforced())
 		return 0;
 
 	return -EPERM;
@@ -1513,7 +2330,21 @@ static int xg_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
 		return 0;
 
 	len = vma->vm_end > vma->vm_start ? vma->vm_end - vma->vm_start : 0;
+	if (!xg_stage_allows_exec_policy()) {
+		pr_info_ratelimited(
+		    XG_TAG ": audited dynamic code mprotect reason=%s "
+			   "stage=%s pid=%d uid=%u comm=%s addr=0x%lx "
+			   "len=%lu\n",
+		    reason, xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm, vma->vm_start,
+		    len);
+		return 0;
+	}
+
 	if (!xg_mark_current_dynamic_code(reason, vma->vm_start, len))
+		return 0;
+
+	if (!xg_stage_is_enforced())
 		return 0;
 
 	return -EPERM;
@@ -1522,6 +2353,10 @@ static int xg_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
 static int xg_ptrace_access_check(struct task_struct *child, unsigned int mode)
 {
 	bool blocked = false;
+
+	xg_maybe_enforce_for_root_manager("ptrace_access_check", NULL);
+	if (!xg_stage_allows_exec_policy())
+		return 0;
 
 	if (!(mode & PTRACE_MODE_ATTACH))
 		return 0;
@@ -1547,6 +2382,10 @@ static int xg_ptrace_traceme(struct task_struct *parent)
 {
 	bool blocked = false;
 
+	xg_maybe_enforce_for_root_manager("ptrace_traceme", NULL);
+	if (!xg_stage_allows_exec_policy())
+		return 0;
+
 	blocked = xg_mark_shell_polluted(current, "ptrace_traceme") ||
 		  xg_mark_radio_storage_polluted(current, "ptrace_traceme");
 	if (!blocked)
@@ -1558,6 +2397,43 @@ static int xg_ptrace_traceme(struct task_struct *parent)
 	    current->pid, __kuid_val(current_uid()), current->comm,
 	    parent ? parent->pid : 0, parent ? parent->comm : "");
 	return -EPERM;
+}
+
+static bool xg_read_file_id_is_module(enum kernel_read_file_id id)
+{
+	return id == READING_MODULE;
+}
+
+static bool xg_load_data_id_is_module(enum kernel_load_data_id id)
+{
+	return id == LOADING_MODULE;
+}
+
+static int xg_kernel_read_file(struct file *file, enum kernel_read_file_id id,
+			       bool contents)
+{
+	char path_buf[XG_EXEC_PATH_LOG_BYTES];
+	char *path = NULL;
+
+	if (file)
+		path = xg_file_path(file, path_buf, sizeof(path_buf));
+
+	if (xg_read_file_id_is_module(id))
+		xg_enter_enforced("kernel_read_file module load", path);
+	else
+		xg_maybe_enforce_for_root_manager("kernel_read_file", path);
+
+	return 0;
+}
+
+static int xg_kernel_load_data(enum kernel_load_data_id id, bool contents)
+{
+	if (xg_load_data_id_is_module(id))
+		xg_enter_enforced("kernel_load_data module load", NULL);
+	else
+		xg_maybe_enforce_for_root_manager("kernel_load_data", NULL);
+
+	return 0;
 }
 
 static void xg_watchdog_report(const char *area, const char *name,
@@ -1631,6 +2507,13 @@ static int __init xg_watchdog_start(void)
 }
 late_initcall(xg_watchdog_start);
 
+static int __init xg_stage_arm_late(void)
+{
+	xg_advance_stage(XG_STAGE_ARMED, "late_initcall", NULL);
+	return 0;
+}
+late_initcall(xg_stage_arm_late);
+
 static struct security_hook_list xg_hooks[] __lsm_ro_after_init = {
     LSM_HOOK_INIT(bprm_check_security, xg_bprm_check_security),
     LSM_HOOK_INIT(file_open, xg_file_open),
@@ -1640,6 +2523,8 @@ static struct security_hook_list xg_hooks[] __lsm_ro_after_init = {
     LSM_HOOK_INIT(file_mprotect, xg_file_mprotect),
     LSM_HOOK_INIT(ptrace_access_check, xg_ptrace_access_check),
     LSM_HOOK_INIT(ptrace_traceme, xg_ptrace_traceme),
+    LSM_HOOK_INIT(kernel_read_file, xg_kernel_read_file),
+    LSM_HOOK_INIT(kernel_load_data, xg_kernel_load_data),
 };
 
 static int __init xg_ddk_init(void)

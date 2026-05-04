@@ -4,11 +4,14 @@ set -eu
 GKI_ROOT="$(pwd)"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 SRC_DIR="$SCRIPT_DIR/xingguang-ddk"
+PATCH_DIR="$SCRIPT_DIR/patches/xingguang-ddk"
 DDK_DIR="$GKI_ROOT/Xingguang-DDK"
 
 if [ -d "$GKI_ROOT/security" ]; then
+	COMMON_ROOT="$GKI_ROOT"
 	SECURITY_DIR="$GKI_ROOT/security"
 elif [ -d "$GKI_ROOT/common/security" ]; then
+	COMMON_ROOT="$GKI_ROOT/common"
 	SECURITY_DIR="$GKI_ROOT/common/security"
 else
 	echo '[ERROR] security directory not found.'
@@ -25,6 +28,31 @@ if [ ! -d "$SRC_DIR" ]; then
 fi
 
 echo "[+] Setting up Xingguang DDK LSM"
+
+if [ -d "$PATCH_DIR" ]; then
+	echo "[+] Applying Xingguang DDK patch stack"
+	for patch in "$PATCH_DIR"/*.patch; do
+		[ -e "$patch" ] || continue
+		name="$(basename "$patch")"
+		optional=false
+		case "$name" in
+			*.optional.patch) optional=true ;;
+		esac
+		if git -C "$COMMON_ROOT" apply --check "$patch" >/dev/null 2>&1; then
+			git -C "$COMMON_ROOT" apply "$patch"
+			echo " - applied $name"
+		elif git -C "$COMMON_ROOT" apply --reverse --check "$patch" >/dev/null 2>&1; then
+			echo " - already applied $name"
+		elif [ "$optional" = true ]; then
+			echo " - skipped optional $name"
+		else
+			echo "[ERROR] failed to apply DDK patch: $patch"
+			git -C "$COMMON_ROOT" apply --check "$patch"
+			exit 1
+		fi
+	done
+fi
+
 rm -rf "$DDK_DIR"
 mkdir -p "$DDK_DIR"
 cp -a "$SRC_DIR/." "$DDK_DIR/"

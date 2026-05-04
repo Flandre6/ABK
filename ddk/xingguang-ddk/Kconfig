@@ -6,8 +6,7 @@ config XINGGUANG_DDK
 	help
 	  Enable the Xingguang DDK LSM guard.
 
-	  This guard audits executable content and raw block-device access from
-	  in-kernel LSM hooks. It blocks gzexe-style self-extracting shell
-	  scripts, suspicious shell-spawned ELF payloads, disguised shell
-	  binaries, dangerous raw block-device writes and ioctls, and privileged
-	  dynamic executable memory.
+	  This guard registers early as an in-tree LSM and then arms protection
+	  in stages. Early boot audits sensitive block and write paths only;
+	  late init enables exec, gzexe, and ptrace tracking; root-manager or
+	  module-load activity switches the full raw block-device policy on.
