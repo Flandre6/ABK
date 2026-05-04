@@ -15,6 +15,7 @@
 #endif
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
+#include <linux/kobject.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/module.h>
@@ -27,6 +28,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/uio.h>
 #include <linux/workqueue.h>
@@ -46,6 +48,7 @@
 #define XG_WATCHDOG_INTERVAL_MS 5000U
 #define XG_WATCHDOG_CANARY_A 0x58474444574d4441ULL
 #define XG_WATCHDOG_CANARY_B 0xa7b8bbc3a8b2bbb9ULL
+#define XG_BOOT_FALLBACK_MS (5U * 60U * 1000U)
 #define XG_EARLY_WINDOW_BYTES (1024U * 1024U)
 #define XG_SINGLE_DEV_EARLY_LIMIT (256U * 1024U)
 #define XG_MULTI_DEV_EARLY_LIMIT 2U
@@ -65,7 +68,7 @@ enum xg_part_class {
 
 enum xg_boot_stage {
 	XG_STAGE_EARLY,
-	XG_STAGE_ARMED,
+	XG_STAGE_BOOT_AUDIT,
 	XG_STAGE_ENFORCED,
 };
 
@@ -134,12 +137,16 @@ static DEFINE_SPINLOCK(xg_watchdog_lock);
 
 static atomic_t xg_stage = ATOMIC_INIT(XG_STAGE_EARLY);
 static struct delayed_work xg_watchdog_work;
+static struct delayed_work xg_boot_fallback_work;
+static struct kobject *xg_sysfs_kobj;
 static struct xg_tagged_task xg_polluted_tasks[16];
 static struct xg_tagged_task xg_dynamic_tasks[32];
 static struct xg_write_flow xg_flows[32];
 static struct xg_tagged_task xg_shell_polluted_tasks[16];
 static struct xg_tagged_task xg_gzexe_polluted_tasks[32];
 static u32 xg_nv_writer_sid;
+static atomic_t xg_boot_completed_seen = ATOMIC_INIT(0);
+static atomic_t xg_fallback_enforced = ATOMIC_INIT(0);
 static bool xg_watchdog_tripped;
 static u64 xg_watchdog_canary_a = XG_WATCHDOG_CANARY_A;
 static u64 xg_watchdog_canary_b = XG_WATCHDOG_CANARY_B;
@@ -177,8 +184,8 @@ static const char *xg_stage_name(enum xg_boot_stage stage)
 	switch (stage) {
 	case XG_STAGE_EARLY:
 		return "EARLY";
-	case XG_STAGE_ARMED:
-		return "ARMED";
+	case XG_STAGE_BOOT_AUDIT:
+		return "BOOT_AUDIT";
 	case XG_STAGE_ENFORCED:
 		return "ENFORCED";
 	default:
@@ -202,14 +209,14 @@ static bool xg_stage_at_least(enum xg_boot_stage stage)
 	return xg_current_stage() >= stage;
 }
 
-static bool xg_stage_is_enforced(void)
-{
-	return xg_stage_at_least(XG_STAGE_ENFORCED);
-}
-
 static bool xg_stage_allows_exec_policy(void)
 {
-	return xg_stage_at_least(XG_STAGE_ARMED);
+	return xg_stage_at_least(XG_STAGE_BOOT_AUDIT);
+}
+
+static bool xg_policy_is_enforced(void)
+{
+	return xg_stage_at_least(XG_STAGE_ENFORCED);
 }
 
 static void xg_advance_stage(enum xg_boot_stage next, const char *reason,
@@ -394,11 +401,20 @@ static bool xg_path_triggers_enforced(const char *path)
 static void xg_maybe_enforce_for_root_manager(const char *hook,
 					      const char *path)
 {
-	if (xg_stage_is_enforced())
+	unsigned int path_len =
+	    path ? strnlen(path, XG_EXEC_PATH_LOG_BYTES) : 0;
+
+	if (xg_policy_is_enforced())
 		return;
 
-	if (xg_path_triggers_enforced(path))
-		xg_enter_enforced(hook, path);
+	if (!xg_path_triggers_enforced(path))
+		return;
+
+	pr_info_ratelimited(XG_TAG ": deferred root-manager trigger via %s "
+				   "stage=%s pid=%d uid=%u comm=%s path=%.*s\n",
+			    hook, xg_stage_name(xg_current_stage()), current->pid,
+			    __kuid_val(current_uid()), current->comm,
+			    (int)path_len, path ? path : "");
 }
 
 static bool xg_path_has_tmp_marker(const char *path)
@@ -712,6 +728,29 @@ static void xg_log_blocked_exec(const char *hook, const char *reason,
 	    features ? features->trusted_system_shell : 0);
 }
 
+static void xg_log_audited_exec(const char *hook, const char *reason,
+				const char *path,
+				const struct xg_exec_features *features)
+{
+	unsigned int path_len =
+	    path ? strnlen(path, XG_EXEC_PATH_LOG_BYTES) : 0;
+
+	pr_info_ratelimited(
+	    XG_TAG
+	    ": audited exec via %s reason=%s stage=%s pid=%d uid=%u comm=%s "
+	    "path=%.*s elf=%u aarch64=%u no_sections=%u packed=%u gzexe=%u "
+	    "fd_empty=%u trusted_shell=%u\n",
+	    hook, reason, xg_stage_name(xg_current_stage()), current->pid,
+	    __kuid_val(current_uid()), current->comm, (int)path_len,
+	    path ? path : "", features ? features->elf : 0,
+	    features ? features->elf_aarch64 : 0,
+	    features ? features->elf_no_sections : 0,
+	    features ? features->elf_packed_layout : 0,
+	    features ? features->gzexe : 0,
+	    features ? features->fd_empty_path : 0,
+	    features ? features->trusted_system_shell : 0);
+}
+
 static void xg_log_blocked_shell_script(const char *hook, const char *reason,
 					const char *script)
 {
@@ -723,6 +762,20 @@ static void xg_log_blocked_shell_script(const char *hook, const char *reason,
 		   "uid=%u comm=%s script=%.*s\n",
 	    hook, reason, current->pid, __kuid_val(current_uid()),
 	    current->comm, (int)script_len, script ? script : "");
+}
+
+static void xg_log_audited_shell_script(const char *hook, const char *reason,
+					const char *script)
+{
+	unsigned int script_len =
+	    script ? strnlen(script, XG_EXEC_PATH_LOG_BYTES) : 0;
+
+	pr_info_ratelimited(
+	    XG_TAG ": audited shell script via %s reason=%s stage=%s pid=%d "
+		   "uid=%u comm=%s script=%.*s\n",
+	    hook, reason, xg_stage_name(xg_current_stage()), current->pid,
+	    __kuid_val(current_uid()), current->comm, (int)script_len,
+	    script ? script : "");
 }
 
 static unsigned int xg_gzexe_sample_seen_bits(const u8 *sample,
@@ -1020,6 +1073,7 @@ static bool xg_mark_current_dynamic_code(const char *reason, unsigned long addr,
 	u32 sid = xg_cred_selinux_sid(cred);
 	bool block = xg_block_privileged_dynamic_code &&
 		     xg_current_is_privileged_dynamic_subject();
+	bool enforced = xg_policy_is_enforced();
 
 	xg_mark_tagged_task(xg_dynamic_tasks, ARRAY_SIZE(xg_dynamic_tasks),
 			    &xg_dynamic_lock, current->tgid, sid);
@@ -1027,8 +1081,8 @@ static bool xg_mark_current_dynamic_code(const char *reason, unsigned long addr,
 	pr_warn_ratelimited(
 	    XG_TAG ": %s suspicious dynamic code via %s pid=%d tgid=%d "
 		   "uid=%u comm=%s sid=%u addr=0x%lx len=%lu\n",
-	    block ? "blocked" : "marked", reason, current->pid, current->tgid,
-	    uid, current->comm, sid, addr, len);
+	    enforced && block ? "blocked" : "audited", reason, current->pid,
+	    current->tgid, uid, current->comm, sid, addr, len);
 
 	return block;
 }
@@ -1382,7 +1436,7 @@ static bool xg_audit_raw_block_if_not_enforced(const char *hook,
 {
 	struct block_device *bdev = xg_file_bdev(file);
 
-	if (!bdev || xg_stage_is_enforced())
+	if (!bdev || xg_policy_is_enforced())
 		return false;
 
 	xg_log_audited_access(hook,
@@ -1402,7 +1456,7 @@ static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 	if (!bdev)
 		return false;
 
-	if (!xg_stage_is_enforced())
+	if (!xg_policy_is_enforced())
 		return false;
 
 	if (xg_current_dynamic_code_polluted(reason))
@@ -1711,6 +1765,17 @@ static bool xg_gzexe_temp_payload_write_should_block(
 
 	xg_mark_current_gzexe_chain(reason, path);
 	path_len = strnlen(path, XG_EXEC_PATH_LOG_BYTES);
+	if (!xg_policy_is_enforced()) {
+		pr_info_ratelimited(
+		    XG_TAG ": audited gzexe temp payload write via %s reason=%s "
+			   "stage=%s pid=%d uid=%u comm=%s path=%.*s "
+			   "count=%llu\n",
+		    hook, reason, xg_stage_name(xg_current_stage()),
+		    current->pid, __kuid_val(current_uid()), current->comm,
+		    (int)path_len, path, (unsigned long long)count);
+		return false;
+	}
+
 	pr_warn_ratelimited(
 	    XG_TAG ": blocked gzexe temp payload write via %s reason=%s "
 		   "pid=%d uid=%u comm=%s path=%.*s count=%llu\n",
@@ -1739,7 +1804,7 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 		return false;
 
 	dev = xg_bdev_dev(file, bdev);
-	if (!xg_stage_is_enforced()) {
+	if (!xg_policy_is_enforced()) {
 		xg_log_audited_access(hook, "raw block-device write", file,
 				      bdev, pos < 0 ? 0 : (u64)pos, count, 0);
 		return false;
@@ -1823,7 +1888,7 @@ static bool xg_bdev_erase_should_block(struct block_device *bdev,
 	pos = (u64)sector << SECTOR_SHIFT;
 	count = (u64)nr_sects << SECTOR_SHIFT;
 
-	if (!xg_stage_is_enforced()) {
+	if (!xg_policy_is_enforced()) {
 		xg_log_audited_access(hook, "raw block-device erase", NULL,
 				      bdev, pos, count, 0);
 		return false;
@@ -1849,11 +1914,11 @@ int xg_ddk_vfs_write(struct file *file, const char __user *buf, size_t count,
 
 	if (xg_gzexe_temp_payload_write_should_block(file, write_pos, count,
 						    "vfs_write", buf, NULL))
-		return -EACCES;
+		return xg_policy_is_enforced() ? -EACCES : 0;
 
 	if (xg_raw_write_should_block(file, write_pos, count, "vfs_write", buf,
 				      NULL))
-		return -EPERM;
+		return xg_policy_is_enforced() ? -EPERM : 0;
 
 	return 0;
 }
@@ -1867,11 +1932,11 @@ int xg_ddk_vfs_iter_write(struct file *file, struct iov_iter *iter,
 	if (xg_gzexe_temp_payload_write_should_block(file, write_pos, count,
 						    "vfs_iter_write", NULL,
 						    iter))
-		return -EACCES;
+		return xg_policy_is_enforced() ? -EACCES : 0;
 
 	if (xg_raw_write_should_block(file, write_pos, count, "vfs_iter_write",
 				      NULL, iter))
-		return -EPERM;
+		return xg_policy_is_enforced() ? -EPERM : 0;
 
 	return 0;
 }
@@ -1884,7 +1949,7 @@ int xg_ddk_blkdev_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 
 	if (xg_raw_write_should_block(file, pos, count, "blkdev_write_iter",
 				      NULL, iter))
-		return -EPERM;
+		return xg_policy_is_enforced() ? -EPERM : 0;
 
 	return 0;
 }
@@ -1898,7 +1963,7 @@ int xg_ddk_blkdev_ioctl(struct block_device *bdev, unsigned int cmd)
 		return 0;
 
 	xg_maybe_enforce_for_root_manager("blkdev_ioctl", NULL);
-	if (!xg_stage_is_enforced()) {
+	if (!xg_policy_is_enforced()) {
 		xg_log_audited_access("blkdev_ioctl",
 				      "raw block-device destructive ioctl",
 				      NULL, bdev, 0, 0, cmd);
@@ -1921,7 +1986,7 @@ int xg_ddk_blkdev_ioctl(struct block_device *bdev, unsigned int cmd)
 		return 0;
 
 	xg_log_blocked_access("blkdev_ioctl", reason, NULL, bdev, 0, 0, cmd);
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 int xg_ddk_blkdev_fallocate(struct file *file, int mode, loff_t start,
@@ -1935,7 +2000,7 @@ int xg_ddk_blkdev_fallocate(struct file *file, int mode, loff_t start,
 	if (!bdev)
 		return 0;
 
-	if (!xg_stage_is_enforced()) {
+	if (!xg_policy_is_enforced()) {
 		xg_log_audited_access("blkdev_fallocate",
 				      "raw block-device fallocate", file, bdev,
 				      start < 0 ? 0 : (u64)start, count, 0);
@@ -1957,7 +2022,7 @@ int xg_ddk_blkdev_fallocate(struct file *file, int mode, loff_t start,
 
 	xg_log_blocked_access("blkdev_fallocate", reason, file, bdev,
 			      start < 0 ? 0 : (u64)start, count, 0);
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 int xg_ddk_blkdev_mmap(struct file *file, struct vm_area_struct *vma)
@@ -1969,7 +2034,7 @@ int xg_ddk_blkdev_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!bdev || !vma || !(vma->vm_flags & VM_WRITE))
 		return 0;
 
-	if (!xg_stage_is_enforced()) {
+	if (!xg_policy_is_enforced()) {
 		xg_log_audited_access("blkdev_mmap",
 				      "writable raw block-device mmap", file,
 				      bdev, 0, 0, 0);
@@ -1990,7 +2055,7 @@ int xg_ddk_blkdev_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	xg_log_blocked_access("blkdev_mmap", reason, file, bdev, 0, 0, 0);
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 int xg_ddk_blkdev_issue_discard(struct block_device *bdev, sector_t sector,
@@ -2000,7 +2065,7 @@ int xg_ddk_blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 					"blkdev_issue_discard"))
 		return 0;
 
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 int xg_ddk_blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
@@ -2010,7 +2075,7 @@ int xg_ddk_blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
 					"blkdev_issue_zeroout"))
 		return 0;
 
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static bool xg_is_selinux_enforce_file(struct file *file)
@@ -2103,8 +2168,14 @@ static int xg_bprm_check_security(struct linux_binprm *bprm)
 	if (!reason)
 		return 0;
 
+	if (!xg_policy_is_enforced()) {
+		xg_log_audited_exec("bprm_check_security", reason, path,
+				     &features);
+		return 0;
+	}
+
 	xg_log_blocked_exec("bprm_check_security", reason, path, &features);
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static bool xg_file_should_sample_script(struct file *file, const char *path)
@@ -2149,8 +2220,12 @@ static int xg_sample_opened_script(struct file *file, const char *path)
 		goto out;
 
 	xg_mark_current_gzexe_chain(reason, path);
-	xg_log_blocked_shell_script("file_open", reason, path);
-	ret = -EACCES;
+	if (xg_policy_is_enforced()) {
+		xg_log_blocked_shell_script("file_open", reason, path);
+		ret = -EACCES;
+	} else {
+		xg_log_audited_shell_script("file_open", reason, path);
+	}
 
 out:
 	kfree(sample);
@@ -2193,7 +2268,7 @@ static int xg_file_open(struct file *file)
 	xg_maybe_enforce_for_root_manager("file_open", path);
 
 	if ((file->f_mode & FMODE_WRITE) && xg_is_selinux_enforce_file(file)) {
-		if (!xg_stage_is_enforced()) {
+		if (!xg_policy_is_enforced()) {
 			pr_info_ratelimited(
 			    XG_TAG ": audited SELinux enforce write via "
 				   "file_open stage=%s pid=%d uid=%u comm=%s\n",
@@ -2205,7 +2280,7 @@ static int xg_file_open(struct file *file)
 		    XG_TAG ": blocked SELinux enforce write via file_open "
 			   "pid=%d uid=%u comm=%s\n",
 		    current->pid, __kuid_val(current_uid()), current->comm);
-		return -EPERM;
+		return xg_policy_is_enforced() ? -EPERM : 0;
 	}
 
 	if ((file->f_mode & FMODE_WRITE) &&
@@ -2216,14 +2291,18 @@ static int xg_file_open(struct file *file)
 	    xg_raw_block_should_block(file, false, &raw_reason)) {
 		xg_log_blocked_access("file_open", raw_reason, file, NULL, 0,
 				      0, 0);
-		return -EPERM;
+		return xg_policy_is_enforced() ? -EPERM : 0;
 	}
 
 	if ((file->f_mode & FMODE_WRITE) &&
 	    xg_gzexe_temp_actor_should_block(path, &reason)) {
 		xg_mark_current_gzexe_chain(reason, path);
+		if (!xg_policy_is_enforced()) {
+			xg_log_audited_shell_script("file_open", reason, path);
+			return 0;
+		}
 		xg_log_blocked_shell_script("file_open", reason, path);
-		return -EACCES;
+		return xg_policy_is_enforced() ? -EACCES : 0;
 	}
 
 	ret = xg_sample_opened_script(file, path);
@@ -2246,7 +2325,7 @@ static int xg_file_permission(struct file *file, int mask)
 	xg_maybe_enforce_for_root_manager("file_permission", path);
 
 	if (xg_is_selinux_enforce_file(file)) {
-		if (!xg_stage_is_enforced()) {
+		if (!xg_policy_is_enforced()) {
 			pr_info_ratelimited(
 			    XG_TAG ": audited SELinux enforce write via "
 				   "file_permission stage=%s pid=%d uid=%u "
@@ -2259,7 +2338,7 @@ static int xg_file_permission(struct file *file, int mask)
 		    XG_TAG ": blocked SELinux enforce write via "
 			   "file_permission pid=%d uid=%u comm=%s\n",
 		    current->pid, __kuid_val(current_uid()), current->comm);
-		return -EPERM;
+		return xg_policy_is_enforced() ? -EPERM : 0;
 	}
 
 	if (xg_audit_raw_block_if_not_enforced("file_permission", file, false, 0))
@@ -2269,7 +2348,7 @@ static int xg_file_permission(struct file *file, int mask)
 		return 0;
 
 	xg_log_blocked_access("file_permission", reason, file, NULL, 0, 0, 0);
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static int xg_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -2288,7 +2367,7 @@ static int xg_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		goto audit_generic;
 
 	xg_log_blocked_access("file_ioctl", reason, file, NULL, 0, 0, cmd);
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 
 audit_generic:
 	bdev = xg_file_bdev(file);
@@ -2332,10 +2411,10 @@ static int xg_mmap_file(struct file *file, unsigned long reqprot,
 	if (!xg_mark_current_dynamic_code(reason, 0, 0))
 		return 0;
 
-	if (!xg_stage_is_enforced())
+	if (!xg_policy_is_enforced())
 		return 0;
 
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static int xg_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
@@ -2376,10 +2455,10 @@ static int xg_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
 	if (!xg_mark_current_dynamic_code(reason, vma->vm_start, len))
 		return 0;
 
-	if (!xg_stage_is_enforced())
+	if (!xg_policy_is_enforced())
 		return 0;
 
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static int xg_ptrace_access_check(struct task_struct *child, unsigned int mode)
@@ -2402,12 +2481,22 @@ static int xg_ptrace_access_check(struct task_struct *child, unsigned int mode)
 	if (!blocked)
 		return 0;
 
+	if (!xg_policy_is_enforced()) {
+		pr_info_ratelimited(
+		    XG_TAG ": audited ptrace attach against protected task stage=%s "
+			   "pid=%d uid=%u comm=%s target_pid=%d target_comm=%s\n",
+		    xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm,
+		    child ? child->pid : 0, child ? child->comm : "");
+		return 0;
+	}
+
 	pr_warn_ratelimited(
 	    XG_TAG ": blocked ptrace attach against protected task pid=%d "
 		   "uid=%u comm=%s target_pid=%d target_comm=%s\n",
 	    current->pid, __kuid_val(current_uid()), current->comm,
 	    child ? child->pid : 0, child ? child->comm : "");
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static int xg_ptrace_traceme(struct task_struct *parent)
@@ -2423,12 +2512,22 @@ static int xg_ptrace_traceme(struct task_struct *parent)
 	if (!blocked)
 		return 0;
 
+	if (!xg_policy_is_enforced()) {
+		pr_info_ratelimited(
+		    XG_TAG ": audited ptrace traceme stage=%s pid=%d uid=%u "
+			   "comm=%s parent_pid=%d parent_comm=%s\n",
+		    xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm,
+		    parent ? parent->pid : 0, parent ? parent->comm : "");
+		return 0;
+	}
+
 	pr_warn_ratelimited(
 	    XG_TAG ": blocked ptrace traceme pid=%d uid=%u comm=%s "
 		   "parent_pid=%d parent_comm=%s\n",
 	    current->pid, __kuid_val(current_uid()), current->comm,
 	    parent ? parent->pid : 0, parent ? parent->comm : "");
-	return -EPERM;
+	return xg_policy_is_enforced() ? -EPERM : 0;
 }
 
 static bool xg_read_file_id_is_module(enum kernel_read_file_id id)
@@ -2478,6 +2577,61 @@ static int xg_kernel_load_data(enum kernel_load_data_id id, bool contents)
 		xg_maybe_enforce_for_root_manager("kernel_load_data", NULL);
 
 	return 0;
+}
+
+static ssize_t xg_stage_show(struct kobject *kobj,
+			     struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%s\n", xg_stage_name(xg_current_stage()));
+}
+
+static ssize_t xg_boot_completed_show(struct kobject *kobj,
+				      struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n",
+			  atomic_read(&xg_boot_completed_seen) ? 1 : 0);
+}
+
+static ssize_t xg_boot_completed_store(struct kobject *kobj,
+				       struct kobj_attribute *attr,
+				       const char *buf, size_t count)
+{
+	if (!sysfs_streq(buf, "1"))
+		return -EINVAL;
+
+	if (atomic_cmpxchg(&xg_boot_completed_seen, 0, 1) == 0) {
+		cancel_delayed_work(&xg_boot_fallback_work);
+		xg_enter_enforced("sysfs boot_completed", NULL);
+	}
+
+	return count;
+}
+
+static struct kobj_attribute xg_stage_attr =
+    __ATTR(stage, 0444, xg_stage_show, NULL);
+static struct kobj_attribute xg_boot_completed_attr =
+    __ATTR(boot_completed, 0644, xg_boot_completed_show,
+	   xg_boot_completed_store);
+
+static struct attribute *xg_sysfs_attrs[] = {
+    &xg_stage_attr.attr,
+    &xg_boot_completed_attr.attr,
+    NULL,
+};
+
+static const struct attribute_group xg_sysfs_group = {
+    .attrs = xg_sysfs_attrs,
+};
+
+static void xg_boot_fallback_workfn(struct work_struct *work)
+{
+	if (atomic_read(&xg_boot_completed_seen))
+		return;
+
+	if (atomic_cmpxchg(&xg_fallback_enforced, 0, 1) != 0)
+		return;
+
+	xg_enter_enforced("boot_completed fallback", NULL);
 }
 
 static void xg_watchdog_report(const char *area, const char *name,
@@ -2553,7 +2707,25 @@ late_initcall(xg_watchdog_start);
 
 static int __init xg_stage_arm_late(void)
 {
-	xg_advance_stage(XG_STAGE_ARMED, "late_initcall", NULL);
+	int ret;
+
+	xg_sysfs_kobj = kobject_create_and_add("xingguang_ddk", kernel_kobj);
+	if (!xg_sysfs_kobj) {
+		pr_err(XG_TAG ": failed to create sysfs kobject\n");
+	} else {
+		ret = sysfs_create_group(xg_sysfs_kobj, &xg_sysfs_group);
+		if (ret)
+			pr_err(XG_TAG ": failed to create sysfs group ret=%d\n",
+			       ret);
+		else
+			pr_info(XG_TAG ": sysfs ready at /sys/kernel/xingguang_ddk\n");
+	}
+
+	INIT_DELAYED_WORK(&xg_boot_fallback_work, xg_boot_fallback_workfn);
+	queue_delayed_work(system_wq, &xg_boot_fallback_work,
+			   msecs_to_jiffies(XG_BOOT_FALLBACK_MS));
+
+	xg_advance_stage(XG_STAGE_BOOT_AUDIT, "late_initcall", NULL);
 	return 0;
 }
 late_initcall(xg_stage_arm_late);
