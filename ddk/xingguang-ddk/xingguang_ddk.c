@@ -43,6 +43,7 @@
 #define XG_EXEC_PATH_LOG_BYTES 192U
 #define XG_EXEC_SAMPLE_BYTES 2048U
 #define XG_GZEXE_CHAIN_WINDOW_MS 60000U
+#define XG_POSTFS_SANDBOX_WINDOW_MS (5U * 60U * 1000U)
 #define XG_WATCHDOG_INTERVAL_MS 5000U
 #define XG_WATCHDOG_CANARY_A 0x58474444574d4441ULL
 #define XG_WATCHDOG_CANARY_B 0xa7b8bbc3a8b2bbb9ULL
@@ -124,6 +125,7 @@ static DEFINE_SPINLOCK(xg_dynamic_lock);
 static DEFINE_SPINLOCK(xg_flow_lock);
 static DEFINE_SPINLOCK(xg_shell_polluted_lock);
 static DEFINE_SPINLOCK(xg_gzexe_polluted_lock);
+static DEFINE_SPINLOCK(xg_postfs_sandbox_lock);
 static DEFINE_SPINLOCK(xg_trusted_shell_lock);
 static DEFINE_SPINLOCK(xg_watchdog_lock);
 
@@ -135,6 +137,7 @@ static struct xg_tagged_task xg_dynamic_tasks[32];
 static struct xg_write_flow xg_flows[32];
 static struct xg_tagged_task xg_shell_polluted_tasks[16];
 static struct xg_tagged_task xg_gzexe_polluted_tasks[32];
+static struct xg_tagged_task xg_postfs_sandbox_tasks[32];
 static atomic_t xg_boot_completed_seen = ATOMIC_INIT(0);
 static atomic_t xg_fallback_enforced = ATOMIC_INIT(0);
 static bool xg_watchdog_tripped;
@@ -209,9 +212,16 @@ static bool xg_policy_is_enforced(void)
 	return xg_stage_at_least(XG_STAGE_ENFORCED);
 }
 
+static bool xg_current_postfs_sandboxed(const char **reason);
+
+static bool xg_policy_subject_can_block(void)
+{
+	return xg_policy_is_enforced() || xg_current_postfs_sandboxed(NULL);
+}
+
 static bool xg_policy_can_block(const char *reason)
 {
-	return reason && *reason && xg_policy_is_enforced();
+	return reason && *reason && xg_policy_subject_can_block();
 }
 
 static int xg_policy_deny(const char *reason, int err)
@@ -393,6 +403,9 @@ static bool xg_path_is_post_fs_data_related(const char *path)
 	       xg_path_under_dir(path, "/data/adb/modules_update");
 }
 
+static void xg_mark_current_postfs_sandbox(const char *reason,
+					   const char *path);
+
 static bool xg_name_is_root_manager_token(const char *name)
 {
 	return xg_name_eq(name, "su") || xg_name_eq(name, "ksu") ||
@@ -431,15 +444,14 @@ static void xg_note_root_manager_path(const char *hook, const char *path)
 	    path ? strnlen(path, XG_EXEC_PATH_LOG_BYTES) : 0;
 
 	if (xg_path_is_post_fs_data_related(path)) {
-		if (!xg_policy_is_enforced()) {
-			pr_warn_ratelimited(
-			    XG_TAG ": early post-fs-data trigger via %s "
-				   "stage=%s pid=%d uid=%u comm=%s path=%.*s\n",
-			    hook, xg_stage_name(xg_current_stage()),
-			    current->pid, __kuid_val(current_uid()),
-			    current->comm, (int)path_len, path ? path : "");
-			xg_enter_enforced("post-fs-data trigger", path);
-		}
+		pr_warn_ratelimited(
+		    XG_TAG ": marked post-fs-data sandbox via %s stage=%s "
+			   "pid=%d uid=%u comm=%s path=%.*s\n",
+		    hook, xg_stage_name(xg_current_stage()), current->pid,
+		    __kuid_val(current_uid()), current->comm, (int)path_len,
+		    path ? path : "");
+		xg_mark_current_postfs_sandbox("post-fs-data module script",
+					       path);
 		return;
 	}
 
@@ -876,14 +888,15 @@ static const char *xg_shell_script_sample_block_reason(const char *path,
 	return NULL;
 }
 
-static void xg_mark_tagged_task(struct xg_tagged_task *tasks,
-				unsigned int count, spinlock_t *lock,
-				pid_t tgid, u32 sid)
+static void xg_mark_tagged_task_window(struct xg_tagged_task *tasks,
+				       unsigned int count, spinlock_t *lock,
+				       pid_t tgid, u32 sid,
+				       unsigned int max_age_ms)
 {
 	struct xg_tagged_task *slot = NULL;
 	unsigned long flags;
 	unsigned long now = jiffies;
-	unsigned long max_age = msecs_to_jiffies(XG_GZEXE_CHAIN_WINDOW_MS);
+	unsigned long max_age = msecs_to_jiffies(max_age_ms);
 	unsigned int i;
 
 	if (tgid <= 0)
@@ -910,12 +923,22 @@ static void xg_mark_tagged_task(struct xg_tagged_task *tasks,
 	spin_unlock_irqrestore(lock, flags);
 }
 
-static bool xg_tagged_tgid(struct xg_tagged_task *tasks, unsigned int count,
-			   spinlock_t *lock, pid_t tgid, u32 sid, bool expire)
+static void xg_mark_tagged_task(struct xg_tagged_task *tasks,
+				unsigned int count, spinlock_t *lock,
+				pid_t tgid, u32 sid)
+{
+	xg_mark_tagged_task_window(tasks, count, lock, tgid, sid,
+				   XG_GZEXE_CHAIN_WINDOW_MS);
+}
+
+static bool xg_tagged_tgid_window(struct xg_tagged_task *tasks,
+				  unsigned int count, spinlock_t *lock,
+				  pid_t tgid, u32 sid, bool expire,
+				  unsigned int max_age_ms)
 {
 	unsigned long flags;
 	unsigned long now = jiffies;
-	unsigned long max_age = msecs_to_jiffies(XG_GZEXE_CHAIN_WINDOW_MS);
+	unsigned long max_age = msecs_to_jiffies(max_age_ms);
 	unsigned int i;
 	bool tagged = false;
 
@@ -936,6 +959,82 @@ static bool xg_tagged_tgid(struct xg_tagged_task *tasks, unsigned int count,
 	spin_unlock_irqrestore(lock, flags);
 
 	return tagged;
+}
+
+static bool xg_tagged_tgid(struct xg_tagged_task *tasks, unsigned int count,
+			   spinlock_t *lock, pid_t tgid, u32 sid, bool expire)
+{
+	return xg_tagged_tgid_window(tasks, count, lock, tgid, sid, expire,
+				     XG_GZEXE_CHAIN_WINDOW_MS);
+}
+
+static void xg_mark_postfs_sandbox_tgid(pid_t tgid, u32 sid,
+					const char *reason, const char *path)
+{
+	unsigned int path_len =
+	    path ? strnlen(path, XG_EXEC_PATH_LOG_BYTES) : 0;
+
+	if (tgid <= 0)
+		return;
+
+	xg_mark_tagged_task_window(xg_postfs_sandbox_tasks,
+				   ARRAY_SIZE(xg_postfs_sandbox_tasks),
+				   &xg_postfs_sandbox_lock, tgid, sid,
+				   XG_POSTFS_SANDBOX_WINDOW_MS);
+
+	pr_warn_ratelimited(
+	    XG_TAG ": post-fs-data sandbox task reason=%s stage=%s pid=%d "
+		   "tgid=%d uid=%u comm=%s target_tgid=%d sid=%u path=%.*s\n",
+	    reason ? reason : "post-fs-data sandbox", xg_stage_name(xg_current_stage()),
+	    current->pid, current->tgid, __kuid_val(current_uid()),
+	    current->comm, tgid, sid, (int)path_len, path ? path : "");
+}
+
+static void xg_mark_current_postfs_sandbox(const char *reason,
+					   const char *path)
+{
+	const struct cred *cred = current_cred();
+	u32 sid = xg_cred_selinux_sid(cred);
+
+	xg_mark_postfs_sandbox_tgid(current->tgid, sid, reason, path);
+}
+
+static bool xg_current_postfs_sandboxed(const char **reason)
+{
+	const struct cred *cred = current_cred();
+	struct task_struct *parent;
+	pid_t parent_tgid = 0;
+	u32 sid = xg_cred_selinux_sid(cred);
+
+	if (xg_tagged_tgid_window(
+		xg_postfs_sandbox_tasks,
+		ARRAY_SIZE(xg_postfs_sandbox_tasks),
+		&xg_postfs_sandbox_lock, current->tgid, sid, true,
+		XG_POSTFS_SANDBOX_WINDOW_MS)) {
+		if (reason)
+			*reason = "post-fs-data sandbox";
+		return true;
+	}
+
+	rcu_read_lock();
+	parent = rcu_dereference(current->real_parent);
+	if (parent)
+		parent_tgid = parent->tgid;
+	rcu_read_unlock();
+
+	if (xg_tagged_tgid_window(xg_postfs_sandbox_tasks,
+				  ARRAY_SIZE(xg_postfs_sandbox_tasks),
+				  &xg_postfs_sandbox_lock, parent_tgid, 0,
+				  true, XG_POSTFS_SANDBOX_WINDOW_MS)) {
+		xg_mark_postfs_sandbox_tgid(current->tgid, sid,
+					    "child of post-fs-data sandbox",
+					    NULL);
+		if (reason)
+			*reason = "child of post-fs-data sandbox";
+		return true;
+	}
+
+	return false;
 }
 
 static bool xg_task_comm_is_shell_like(struct task_struct *task)
@@ -1446,7 +1545,7 @@ static bool xg_audit_raw_block_if_not_enforced(const char *hook,
 {
 	struct block_device *bdev = xg_file_bdev(file);
 
-	if (!bdev || xg_policy_is_enforced())
+	if (!bdev || xg_policy_subject_can_block())
 		return false;
 
 	xg_log_audited_access(hook,
@@ -1462,12 +1561,15 @@ static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 {
 	struct block_device *bdev = xg_file_bdev(file);
 	enum xg_part_class part_class;
+	bool postfs_sandboxed;
 
 	if (!bdev)
 		return false;
 
-	if (!xg_policy_is_enforced())
+	if (!xg_policy_subject_can_block())
 		return false;
+
+	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
 
 	if (xg_current_dynamic_code_polluted(reason))
 		return true;
@@ -1497,6 +1599,12 @@ static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 	if (part_class == XG_PART_RADIO_NV) {
 		*reason = destructive_ioctl ? "protected radio NV partition ioctl" :
 					      "protected radio NV partition raw write";
+		return true;
+	}
+
+	if (destructive_ioctl && postfs_sandboxed &&
+	    !xg_bdev_is_zram(bdev)) {
+		*reason = "post-fs-data sandbox destructive raw block ioctl";
 		return true;
 	}
 
@@ -1773,7 +1881,7 @@ static bool xg_gzexe_temp_payload_write_should_block(
 
 	xg_mark_current_gzexe_chain(reason, path);
 	path_len = strnlen(path, XG_EXEC_PATH_LOG_BYTES);
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_can_block(reason)) {
 		pr_info_ratelimited(
 		    XG_TAG ": audited gzexe temp payload write via %s reason=%s "
 			   "stage=%s pid=%d uid=%u comm=%s path=%.*s "
@@ -1803,6 +1911,7 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 	enum xg_part_class part_class;
 	const char *reason = NULL;
 	dev_t dev;
+	bool postfs_sandboxed;
 
 	if (file)
 		path = xg_file_path(file, path_buf, sizeof(path_buf));
@@ -1812,12 +1921,13 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 		return false;
 
 	dev = xg_bdev_dev(file, bdev);
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_subject_can_block()) {
 		xg_log_audited_access(hook, "raw block-device write", file,
 				      bdev, pos < 0 ? 0 : (u64)pos, count, 0);
 		return false;
 	}
 
+	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
 	part_class = xg_classify_bdev_range(bdev, pos, count);
 
 	if (xg_current_dynamic_code_polluted(&reason))
@@ -1856,6 +1966,11 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 
 	if ((u64)pos < XG_EARLY_WINDOW_BYTES &&
 	    count > XG_GENERIC_BULK_WRITE_LIMIT) {
+		if (postfs_sandboxed && !xg_bdev_is_zram(bdev)) {
+			reason =
+			    "post-fs-data sandbox bulk generic raw block write";
+			goto block;
+		}
 		xg_log_audited_access(hook,
 				      "oversized early raw block-device write",
 				      file, bdev, (u64)pos, count, 0);
@@ -1863,10 +1978,20 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 	}
 
 	if (xg_flow_should_block(dev, pos, count, &reason)) {
+		if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
+			goto block;
 		xg_log_audited_access(
 		    hook, reason ? reason : "generic early raw block-device flow",
 		    file, bdev, (u64)pos, count, 0);
 		return false;
+	}
+
+	if (postfs_sandboxed && part_class == XG_PART_GENERIC &&
+	    !xg_bdev_is_zram(bdev) && pos >= 0 &&
+	    (u64)pos < XG_EARLY_WINDOW_BYTES &&
+	    xg_write_sample_is_zero(buf, iter, count)) {
+		reason = "post-fs-data sandbox zero-fill generic raw block write";
+		goto block;
 	}
 
 	return false;
@@ -1885,6 +2010,7 @@ static bool xg_bdev_erase_should_block(struct block_device *bdev,
 	const char *reason = NULL;
 	u64 pos;
 	u64 count;
+	bool postfs_sandboxed;
 
 	if (!bdev || !nr_sects)
 		return false;
@@ -1892,12 +2018,13 @@ static bool xg_bdev_erase_should_block(struct block_device *bdev,
 	pos = (u64)sector << SECTOR_SHIFT;
 	count = (u64)nr_sects << SECTOR_SHIFT;
 
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_subject_can_block()) {
 		xg_log_audited_access(hook, "raw block-device erase", NULL,
 				      bdev, pos, count, 0);
 		return false;
 	}
 
+	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
 	part_class = xg_classify_bdev_range(bdev, pos, count);
 	if (part_class == XG_PART_FIRMWARE)
 		reason = xg_classify_bdev(bdev) == XG_PART_FIRMWARE ?
@@ -1907,6 +2034,8 @@ static bool xg_bdev_erase_should_block(struct block_device *bdev,
 		reason = xg_classify_bdev(bdev) == XG_PART_RADIO_NV ?
 			     "protected radio NV partition erase" :
 			     "protected radio NV partition erase via whole disk";
+	else if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
+		reason = "post-fs-data sandbox generic raw block erase";
 
 	if (!reason)
 		return false;
@@ -1966,18 +2095,20 @@ int xg_ddk_blkdev_ioctl(struct block_device *bdev, unsigned int cmd)
 {
 	enum xg_part_class part_class;
 	const char *reason = NULL;
+	bool postfs_sandboxed;
 
 	if (!bdev || !xg_is_destructive_blk_ioctl(cmd))
 		return 0;
 
 	xg_note_root_manager_path("blkdev_ioctl", NULL);
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_subject_can_block()) {
 		xg_log_audited_access("blkdev_ioctl",
 				      "raw block-device destructive ioctl",
 				      NULL, bdev, 0, 0, cmd);
 		return 0;
 	}
 
+	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
 	part_class = xg_classify_bdev(bdev);
 	if (part_class == XG_PART_GENERIC && !bdev_is_partition(bdev) &&
 	    xg_bdev_has_protected_part(bdev, &part_class))
@@ -1986,6 +2117,8 @@ int xg_ddk_blkdev_ioctl(struct block_device *bdev, unsigned int cmd)
 		reason = "protected firmware partition ioctl";
 	else if (part_class == XG_PART_RADIO_NV)
 		reason = "protected radio NV partition ioctl";
+	else if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
+		reason = "post-fs-data sandbox destructive raw block ioctl";
 	else if (!xg_bdev_is_zram(bdev)) {
 		xg_log_audited_access("blkdev_ioctl",
 				      "destructive raw block-device ioctl", NULL,
@@ -2007,17 +2140,19 @@ int xg_ddk_blkdev_fallocate(struct file *file, int mode, loff_t start,
 	enum xg_part_class part_class;
 	const char *reason = NULL;
 	u64 count = len > 0 ? (u64)len : 0;
+	bool postfs_sandboxed;
 
 	if (!bdev)
 		return 0;
 
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_subject_can_block()) {
 		xg_log_audited_access("blkdev_fallocate",
 				      "raw block-device fallocate", file, bdev,
 				      start < 0 ? 0 : (u64)start, count, 0);
 		return 0;
 	}
 
+	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
 	part_class = xg_classify_bdev_range(bdev, start, count);
 	if (part_class == XG_PART_FIRMWARE)
 		reason = xg_classify_bdev(bdev) == XG_PART_FIRMWARE ?
@@ -2027,6 +2162,8 @@ int xg_ddk_blkdev_fallocate(struct file *file, int mode, loff_t start,
 		reason = xg_classify_bdev(bdev) == XG_PART_RADIO_NV ?
 			     "protected radio NV partition fallocate" :
 			     "protected radio NV partition fallocate via whole disk";
+	else if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
+		reason = "post-fs-data sandbox generic raw block fallocate";
 
 	if (!reason) {
 		xg_log_audited_access("blkdev_fallocate",
@@ -2045,17 +2182,19 @@ int xg_ddk_blkdev_mmap(struct file *file, struct vm_area_struct *vma)
 	struct block_device *bdev = xg_file_bdev(file);
 	enum xg_part_class part_class;
 	const char *reason = NULL;
+	bool postfs_sandboxed;
 
 	if (!bdev || !vma || !(vma->vm_flags & VM_WRITE))
 		return 0;
 
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_subject_can_block()) {
 		xg_log_audited_access("blkdev_mmap",
 				      "writable raw block-device mmap", file,
 				      bdev, 0, 0, 0);
 		return 0;
 	}
 
+	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
 	part_class = xg_classify_bdev(bdev);
 	if (part_class == XG_PART_GENERIC && !bdev_is_partition(bdev) &&
 	    xg_bdev_has_protected_part(bdev, &part_class))
@@ -2064,6 +2203,8 @@ int xg_ddk_blkdev_mmap(struct file *file, struct vm_area_struct *vma)
 		reason = "protected firmware partition writable mmap";
 	else if (part_class == XG_PART_RADIO_NV)
 		reason = "protected radio NV partition writable mmap";
+	else if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
+		reason = "post-fs-data sandbox generic writable raw block mmap";
 
 	if (!reason) {
 		xg_log_audited_access("blkdev_mmap",
@@ -2181,7 +2322,7 @@ static int xg_bprm_check_security(struct linux_binprm *bprm)
 	if (!reason)
 		return 0;
 
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_can_block(reason)) {
 		xg_log_audited_exec("bprm_check_security", reason, path,
 				     &features);
 		return 0;
@@ -2311,7 +2452,7 @@ static int xg_file_open(struct file *file)
 	if ((file->f_mode & FMODE_WRITE) &&
 	    xg_gzexe_temp_actor_should_block(path, &reason)) {
 		xg_mark_current_gzexe_chain(reason, path);
-		if (!xg_policy_is_enforced()) {
+		if (!xg_policy_can_block(reason)) {
 			xg_log_audited_shell_script("file_open", reason, path);
 			return 0;
 		}
@@ -2483,7 +2624,7 @@ static int xg_ptrace_access_check(struct task_struct *child, unsigned int mode)
 	if (!blocked)
 		return 0;
 
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_can_block("ptrace attach against protected task")) {
 		pr_info_ratelimited(
 		    XG_TAG ": audited ptrace attach against protected task stage=%s "
 			   "pid=%d uid=%u comm=%s target_pid=%d target_comm=%s\n",
@@ -2513,7 +2654,7 @@ static int xg_ptrace_traceme(struct task_struct *parent)
 	if (!blocked)
 		return 0;
 
-	if (!xg_policy_is_enforced()) {
+	if (!xg_policy_can_block("ptrace traceme")) {
 		pr_info_ratelimited(
 		    XG_TAG ": audited ptrace traceme stage=%s pid=%d uid=%u "
 			   "comm=%s parent_pid=%d parent_comm=%s\n",
