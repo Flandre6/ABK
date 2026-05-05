@@ -386,13 +386,11 @@ static bool xg_name_is_post_fs_data_script(const char *name)
 
 static bool xg_path_is_post_fs_data_related(const char *path)
 {
-	if (!xg_path_under_dir(path, "/data/adb"))
+	if (!xg_name_is_post_fs_data_script(xg_basename(path)))
 		return false;
 
-	if (xg_path_has_component(path, "post-fs-data.d"))
-		return true;
-
-	return xg_name_is_post_fs_data_script(xg_basename(path));
+	return xg_path_under_dir(path, "/data/adb/modules") ||
+	       xg_path_under_dir(path, "/data/adb/modules_update");
 }
 
 static bool xg_name_is_root_manager_token(const char *name)
