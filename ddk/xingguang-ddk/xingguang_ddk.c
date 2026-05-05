@@ -342,6 +342,18 @@ static bool xg_path_has_prefix(const char *path, const char *prefix)
 	return path && !strncmp(path, prefix, strlen(prefix));
 }
 
+static bool xg_path_under_dir(const char *path, const char *dir)
+{
+	size_t dir_len;
+
+	if (!path || !dir)
+		return false;
+
+	dir_len = strlen(dir);
+	return !strncmp(path, dir, dir_len) &&
+	       (path[dir_len] == '\0' || path[dir_len] == '/');
+}
+
 static bool xg_path_has_component(const char *path, const char *component)
 {
 	const char *p;
@@ -364,6 +376,23 @@ static bool xg_path_has_component(const char *path, const char *component)
 	}
 
 	return false;
+}
+
+static bool xg_name_is_post_fs_data_script(const char *name)
+{
+	return xg_name_eq(name, "post-fs-data") ||
+	       xg_name_eq(name, "post-fs-data.sh");
+}
+
+static bool xg_path_is_post_fs_data_related(const char *path)
+{
+	if (!xg_path_under_dir(path, "/data/adb"))
+		return false;
+
+	if (xg_path_has_component(path, "post-fs-data.d"))
+		return true;
+
+	return xg_name_is_post_fs_data_script(xg_basename(path));
 }
 
 static bool xg_name_is_root_manager_token(const char *name)
@@ -402,6 +431,19 @@ static void xg_note_root_manager_path(const char *hook, const char *path)
 {
 	unsigned int path_len =
 	    path ? strnlen(path, XG_EXEC_PATH_LOG_BYTES) : 0;
+
+	if (xg_path_is_post_fs_data_related(path)) {
+		if (!xg_policy_is_enforced()) {
+			pr_warn_ratelimited(
+			    XG_TAG ": early post-fs-data trigger via %s "
+				   "stage=%s pid=%d uid=%u comm=%s path=%.*s\n",
+			    hook, xg_stage_name(xg_current_stage()),
+			    current->pid, __kuid_val(current_uid()),
+			    current->comm, (int)path_len, path ? path : "");
+			xg_enter_enforced("post-fs-data trigger", path);
+		}
+		return;
+	}
 
 	if (xg_policy_is_enforced())
 		return;
