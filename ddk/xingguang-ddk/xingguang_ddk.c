@@ -47,12 +47,16 @@
 #define XG_WATCHDOG_INTERVAL_MS 5000U
 #define XG_WATCHDOG_CANARY_A 0x58474444574d4441ULL
 #define XG_WATCHDOG_CANARY_B 0xa7b8bbc3a8b2bbb9ULL
-#define XG_BOOT_FALLBACK_MS (3U * 60U * 1000U)
+#define XG_DELAYED_ENFORCE_MS (5U * 60U * 1000U)
+#define XG_OTA_AUDIT_DELAY_MS (15U * 60U * 1000U)
 #define XG_EARLY_WINDOW_BYTES (1024U * 1024U)
 #define XG_SINGLE_DEV_EARLY_LIMIT (256U * 1024U)
 #define XG_MULTI_DEV_EARLY_LIMIT 2U
 #define XG_FLOW_WINDOW_MS 10000U
 #define XG_GENERIC_BULK_WRITE_LIMIT (8U * 1024U * 1024U)
+#define XG_RADIO_NV_PROFILE_SLOTS 8U
+#define XG_RADIO_NV_PROFILE_TOLERANCE_BYTES (1024U * 1024U)
+#define XG_RADIO_NV_PROFILE_MIN_COUNT 2U
 
 #define XG_GZEXE_SEEN_MAGIC (1U << 0)
 #define XG_GZEXE_SEEN_SKIP (1U << 1)
@@ -95,6 +99,15 @@ struct xg_tagged_task {
 	unsigned long last_seen;
 };
 
+struct xg_radio_nv_profile {
+	dev_t dev;
+	u64 min_pos;
+	u64 max_end;
+	u64 max_count;
+	unsigned int writes;
+	bool valid;
+};
+
 struct xg_trusted_exec_identity {
 	const char *path;
 	dev_t sb_dev;
@@ -128,18 +141,22 @@ static DEFINE_SPINLOCK(xg_gzexe_polluted_lock);
 static DEFINE_SPINLOCK(xg_postfs_sandbox_lock);
 static DEFINE_SPINLOCK(xg_trusted_shell_lock);
 static DEFINE_SPINLOCK(xg_watchdog_lock);
+static DEFINE_SPINLOCK(xg_radio_nv_profile_lock);
 
 static atomic_t xg_stage = ATOMIC_INIT(XG_STAGE_EARLY);
 static struct delayed_work xg_watchdog_work;
-static struct delayed_work xg_boot_fallback_work;
+static struct delayed_work xg_delayed_enforce_work;
 static struct kobject *xg_sysfs_kobj;
 static struct xg_tagged_task xg_dynamic_tasks[32];
 static struct xg_write_flow xg_flows[32];
 static struct xg_tagged_task xg_shell_polluted_tasks[16];
 static struct xg_tagged_task xg_gzexe_polluted_tasks[32];
 static struct xg_tagged_task xg_postfs_sandbox_tasks[32];
-static atomic_t xg_boot_completed_seen = ATOMIC_INIT(0);
-static atomic_t xg_fallback_enforced = ATOMIC_INIT(0);
+static struct xg_radio_nv_profile
+	xg_radio_nv_profiles[XG_RADIO_NV_PROFILE_SLOTS];
+static atomic_t xg_delayed_enforce_ready = ATOMIC_INIT(0);
+static atomic_t xg_delayed_enforced = ATOMIC_INIT(0);
+static atomic_t xg_ota_audit_delay_seen = ATOMIC_INIT(0);
 static bool xg_watchdog_tripped;
 static u64 xg_watchdog_canary_a = XG_WATCHDOG_CANARY_A;
 static u64 xg_watchdog_canary_b = XG_WATCHDOG_CANARY_B;
@@ -228,6 +245,37 @@ static int xg_policy_deny(const char *reason, int err)
 {
 	return xg_policy_can_block(reason) ? -err : 0;
 }
+
+static bool xg_dm_target_is_snapshot_ota(const char *type)
+{
+	return type && (!strcmp(type, "snapshot") ||
+			!strcmp(type, "snapshot-merge") ||
+			!strcmp(type, "snapshot-origin") ||
+			!strcmp(type, "user"));
+}
+
+static void xg_extend_audit_for_snapshot_ota(const char *type)
+{
+	if (!xg_dm_target_is_snapshot_ota(type) || xg_policy_is_enforced())
+		return;
+
+	if (atomic_cmpxchg(&xg_ota_audit_delay_seen, 0, 1) == 0)
+		pr_warn_ratelimited(
+		    XG_TAG ": snapshot/COW dm target detected, extending "
+			   "boot audit window target=%s delay_ms=%u\n",
+		    type ? type : "", XG_OTA_AUDIT_DELAY_MS);
+
+	if (atomic_read(&xg_delayed_enforce_ready) &&
+	    !atomic_read(&xg_delayed_enforced))
+		mod_delayed_work(system_wq, &xg_delayed_enforce_work,
+				 msecs_to_jiffies(XG_OTA_AUDIT_DELAY_MS));
+}
+
+void xg_ddk_dm_target_add(const char *type)
+{
+	xg_extend_audit_for_snapshot_ota(type);
+}
+EXPORT_SYMBOL_GPL(xg_ddk_dm_target_add);
 
 static void xg_advance_stage(enum xg_boot_stage next, const char *reason,
 			     const char *path)
@@ -1344,6 +1392,26 @@ static bool xg_bdev_is_zram(struct block_device *bdev)
 	return name && !strncmp(name, "zram", 4);
 }
 
+static struct xg_radio_nv_profile *xg_radio_nv_profile_slot(dev_t dev)
+{
+	struct xg_radio_nv_profile *free_slot = NULL;
+	unsigned int i;
+
+	if (!dev)
+		return NULL;
+
+	for (i = 0; i < ARRAY_SIZE(xg_radio_nv_profiles); i++) {
+		if (xg_radio_nv_profiles[i].valid &&
+		    xg_radio_nv_profiles[i].dev == dev)
+			return &xg_radio_nv_profiles[i];
+
+		if (!free_slot && !xg_radio_nv_profiles[i].valid)
+			free_slot = &xg_radio_nv_profiles[i];
+	}
+
+	return free_slot ? free_slot : &xg_radio_nv_profiles[0];
+}
+
 static dev_t xg_bdev_dev(struct file *file, struct block_device *bdev)
 {
 	struct inode *inode;
@@ -1356,6 +1424,106 @@ static dev_t xg_bdev_dev(struct file *file, struct block_device *bdev)
 
 	inode = file_inode(file);
 	return inode ? inode->i_rdev : 0;
+}
+
+static void xg_radio_nv_learn_write(dev_t dev, loff_t pos, u64 count,
+				    const char *hook)
+{
+	struct xg_radio_nv_profile *profile;
+	unsigned long flags;
+	u64 start;
+	u64 end;
+
+	if (!dev || pos < 0 || !count)
+		return;
+
+	start = (u64)pos;
+	if (check_add_overflow(start, count, &end))
+		end = U64_MAX;
+
+	spin_lock_irqsave(&xg_radio_nv_profile_lock, flags);
+	profile = xg_radio_nv_profile_slot(dev);
+	if (profile) {
+		if (!profile->valid || profile->dev != dev) {
+			memset(profile, 0, sizeof(*profile));
+			profile->dev = dev;
+			profile->min_pos = start;
+			profile->max_end = end;
+			profile->max_count = count;
+			profile->valid = true;
+		} else {
+			profile->min_pos = min(profile->min_pos, start);
+			profile->max_end = max(profile->max_end, end);
+			profile->max_count = max(profile->max_count, count);
+		}
+		profile->writes++;
+	}
+	spin_unlock_irqrestore(&xg_radio_nv_profile_lock, flags);
+
+	pr_info_ratelimited(
+	    XG_TAG ": learned radio NV write behavior via %s stage=%s "
+		   "pid=%d uid=%u comm=%s dev=%u:%u pos=%llu count=%llu\n",
+	    hook, xg_stage_name(xg_current_stage()), current->pid,
+	    __kuid_val(current_uid()), current->comm, MAJOR(dev), MINOR(dev),
+	    start, count);
+}
+
+static bool xg_radio_nv_profile_allows_write(dev_t dev, loff_t pos, u64 count,
+					     const char **reason)
+{
+	struct xg_radio_nv_profile snapshot = {};
+	struct xg_radio_nv_profile *profile;
+	unsigned long flags;
+	u64 start;
+	u64 end;
+	bool found = false;
+
+	if (!dev || pos < 0 || !count) {
+		if (reason)
+			*reason = "invalid radio NV write geometry";
+		return false;
+	}
+
+	start = (u64)pos;
+	if (check_add_overflow(start, count, &end))
+		end = U64_MAX;
+
+	spin_lock_irqsave(&xg_radio_nv_profile_lock, flags);
+	profile = xg_radio_nv_profile_slot(dev);
+	if (profile && profile->valid && profile->dev == dev) {
+		snapshot = *profile;
+		found = true;
+	}
+	spin_unlock_irqrestore(&xg_radio_nv_profile_lock, flags);
+
+	if (!found || snapshot.writes < XG_RADIO_NV_PROFILE_MIN_COUNT) {
+		if (count <= XG_SINGLE_DEV_EARLY_LIMIT &&
+		    start >= XG_EARLY_WINDOW_BYTES) {
+			if (reason)
+				*reason = "radio NV conservative unlearned write";
+			return true;
+		}
+		if (reason)
+			*reason = "radio NV write before stable profile";
+		return false;
+	}
+
+	if (count > snapshot.max_count + XG_RADIO_NV_PROFILE_TOLERANCE_BYTES) {
+		if (reason)
+			*reason = "radio NV write larger than learned behavior";
+		return false;
+	}
+
+	if (end < snapshot.min_pos ||
+	    start > snapshot.max_end + XG_RADIO_NV_PROFILE_TOLERANCE_BYTES) {
+		if (reason)
+			*reason = "radio NV write outside learned range";
+		return false;
+	}
+
+	if (reason)
+		*reason = "radio NV write matched learned behavior";
+	return true;
 }
 
 static bool xg_bdev_range_overlaps(struct block_device *part, sector_t start,
@@ -1538,6 +1706,21 @@ static bool xg_is_destructive_blk_ioctl(unsigned int cmd)
 	}
 }
 
+static bool xg_is_erasing_blk_ioctl(unsigned int cmd)
+{
+	switch (cmd) {
+	case BLKDISCARD:
+	case BLKSECDISCARD:
+	case BLKZEROOUT:
+#ifdef BLKRESETZONE
+	case BLKRESETZONE:
+#endif
+		return true;
+	default:
+		return false;
+	}
+}
+
 static bool xg_audit_raw_block_if_not_enforced(const char *hook,
 					       struct file *file,
 					       bool destructive_ioctl,
@@ -1557,7 +1740,7 @@ static bool xg_audit_raw_block_if_not_enforced(const char *hook,
 }
 
 static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
-				      const char **reason)
+				      unsigned int cmd, const char **reason)
 {
 	struct block_device *bdev = xg_file_bdev(file);
 	enum xg_part_class part_class;
@@ -1596,11 +1779,13 @@ static bool xg_raw_block_should_block(struct file *file, bool destructive_ioctl,
 		return true;
 	}
 
-	if (part_class == XG_PART_RADIO_NV) {
-		*reason = destructive_ioctl ? "protected radio NV partition ioctl" :
-					      "protected radio NV partition raw write";
+	if (part_class == XG_PART_RADIO_NV && destructive_ioctl &&
+	    xg_is_erasing_blk_ioctl(cmd)) {
+		*reason = "protected radio NV partition erasing ioctl";
 		return true;
 	}
+	if (part_class == XG_PART_RADIO_NV && destructive_ioctl)
+		return false;
 
 	if (destructive_ioctl && postfs_sandboxed &&
 	    !xg_bdev_is_zram(bdev)) {
@@ -1910,6 +2095,7 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 	struct block_device *bdev = xg_file_bdev(file);
 	enum xg_part_class part_class;
 	const char *reason = NULL;
+	const char *learn_reason = NULL;
 	dev_t dev;
 	bool postfs_sandboxed;
 
@@ -1921,14 +2107,16 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 		return false;
 
 	dev = xg_bdev_dev(file, bdev);
+	part_class = xg_classify_bdev_range(bdev, pos, count);
 	if (!xg_policy_subject_can_block()) {
+		if (part_class == XG_PART_RADIO_NV && pos >= 0)
+			xg_radio_nv_learn_write(dev, pos, count, hook);
 		xg_log_audited_access(hook, "raw block-device write", file,
 				      bdev, pos < 0 ? 0 : (u64)pos, count, 0);
 		return false;
 	}
 
 	postfs_sandboxed = xg_current_postfs_sandboxed(NULL);
-	part_class = xg_classify_bdev_range(bdev, pos, count);
 
 	if (xg_current_dynamic_code_polluted(&reason))
 		goto block;
@@ -1958,9 +2146,17 @@ static bool xg_raw_write_should_block(struct file *file, loff_t pos,
 			goto block;
 		}
 
-		reason = xg_classify_bdev(bdev) == XG_PART_RADIO_NV ?
-			     "protected radio NV partition raw write" :
-			     "protected radio NV partition raw write via whole disk";
+		if (xg_radio_nv_profile_allows_write(dev, pos, count,
+						     &learn_reason)) {
+			xg_log_audited_access(
+			    hook, learn_reason ? learn_reason :
+						  "learned radio NV raw write",
+			    file, bdev, (u64)pos, count, 0);
+			return false;
+		}
+
+		reason = learn_reason ? learn_reason :
+					"radio NV raw write outside learned behavior";
 		goto block;
 	}
 
@@ -2115,9 +2311,15 @@ int xg_ddk_blkdev_ioctl(struct block_device *bdev, unsigned int cmd)
 		reason = "protected partition ioctl via whole disk";
 	else if (part_class == XG_PART_FIRMWARE)
 		reason = "protected firmware partition ioctl";
-	else if (part_class == XG_PART_RADIO_NV)
-		reason = "protected radio NV partition ioctl";
-	else if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
+	else if (part_class == XG_PART_RADIO_NV &&
+		 xg_is_erasing_blk_ioctl(cmd))
+		reason = "protected radio NV partition erasing ioctl";
+	else if (part_class == XG_PART_RADIO_NV) {
+		xg_log_audited_access("blkdev_ioctl",
+				      "radio NV non-erasing raw block ioctl",
+				      NULL, bdev, 0, 0, cmd);
+		return 0;
+	} else if (postfs_sandboxed && !xg_bdev_is_zram(bdev))
 		reason = "post-fs-data sandbox destructive raw block ioctl";
 	else if (!xg_bdev_is_zram(bdev)) {
 		xg_log_audited_access("blkdev_ioctl",
@@ -2443,7 +2645,7 @@ static int xg_file_open(struct file *file)
 		return 0;
 
 	if ((file->f_mode & FMODE_WRITE) &&
-	    xg_raw_block_should_block(file, false, &raw_reason)) {
+	    xg_raw_block_should_block(file, false, 0, &raw_reason)) {
 		xg_log_blocked_access("file_open", raw_reason, file, NULL, 0,
 				      0, 0);
 		return xg_policy_deny(raw_reason, EPERM);
@@ -2500,7 +2702,7 @@ static int xg_file_permission(struct file *file, int mask)
 	if (xg_audit_raw_block_if_not_enforced("file_permission", file, false, 0))
 		return 0;
 
-	if (!xg_raw_block_should_block(file, false, &reason))
+	if (!xg_raw_block_should_block(file, false, 0, &reason))
 		return 0;
 
 	xg_log_blocked_access("file_permission", reason, file, NULL, 0, 0, 0);
@@ -2510,6 +2712,7 @@ static int xg_file_permission(struct file *file, int mask)
 static int xg_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct block_device *bdev;
+	enum xg_part_class part_class;
 	const char *reason = NULL;
 
 	if (!file || !xg_is_destructive_blk_ioctl(cmd))
@@ -2519,7 +2722,7 @@ static int xg_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (xg_audit_raw_block_if_not_enforced("file_ioctl", file, true, cmd))
 		return 0;
 
-	if (!xg_raw_block_should_block(file, true, &reason))
+	if (!xg_raw_block_should_block(file, true, cmd, &reason))
 		goto audit_generic;
 
 	xg_log_blocked_access("file_ioctl", reason, file, NULL, 0, 0, cmd);
@@ -2527,11 +2730,18 @@ static int xg_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 audit_generic:
 	bdev = xg_file_bdev(file);
-	if (bdev && xg_classify_bdev(bdev) == XG_PART_GENERIC &&
-	    !xg_bdev_is_zram(bdev))
+	if (!bdev)
+		return 0;
+
+	part_class = xg_classify_bdev(bdev);
+	if (part_class == XG_PART_RADIO_NV)
 		xg_log_audited_access("file_ioctl",
-				      "destructive raw block-device ioctl", file,
-				      bdev, 0, 0, cmd);
+				      "radio NV non-erasing raw block ioctl",
+				      file, bdev, 0, 0, cmd);
+	else if (part_class == XG_PART_GENERIC && !xg_bdev_is_zram(bdev))
+		xg_log_audited_access("file_ioctl",
+				      "destructive raw block-device ioctl",
+				      file, bdev, 0, 0, cmd);
 	return 0;
 }
 
@@ -2727,37 +2937,21 @@ static ssize_t xg_stage_show(struct kobject *kobj,
 	return sysfs_emit(buf, "%s\n", xg_stage_name(xg_current_stage()));
 }
 
-static ssize_t xg_boot_completed_show(struct kobject *kobj,
-				      struct kobj_attribute *attr, char *buf)
+static ssize_t xg_ota_audit_delay_show(struct kobject *kobj,
+				       struct kobj_attribute *attr, char *buf)
 {
 	return sysfs_emit(buf, "%d\n",
-			  atomic_read(&xg_boot_completed_seen) ? 1 : 0);
-}
-
-static ssize_t xg_boot_completed_store(struct kobject *kobj,
-				       struct kobj_attribute *attr,
-				       const char *buf, size_t count)
-{
-	if (!sysfs_streq(buf, "1"))
-		return -EINVAL;
-
-	if (atomic_cmpxchg(&xg_boot_completed_seen, 0, 1) == 0) {
-		cancel_delayed_work(&xg_boot_fallback_work);
-		xg_enter_enforced("sysfs boot_completed", NULL);
-	}
-
-	return count;
+			  atomic_read(&xg_ota_audit_delay_seen) ? 1 : 0);
 }
 
 static struct kobj_attribute xg_stage_attr =
     __ATTR(stage, 0444, xg_stage_show, NULL);
-static struct kobj_attribute xg_boot_completed_attr =
-    __ATTR(boot_completed, 0644, xg_boot_completed_show,
-	   xg_boot_completed_store);
+static struct kobj_attribute xg_ota_audit_delay_attr =
+    __ATTR(ota_audit_delay, 0444, xg_ota_audit_delay_show, NULL);
 
 static struct attribute *xg_sysfs_attrs[] = {
     &xg_stage_attr.attr,
-    &xg_boot_completed_attr.attr,
+    &xg_ota_audit_delay_attr.attr,
     NULL,
 };
 
@@ -2765,15 +2959,15 @@ static const struct attribute_group xg_sysfs_group = {
     .attrs = xg_sysfs_attrs,
 };
 
-static void xg_boot_fallback_workfn(struct work_struct *work)
+static void xg_delayed_enforce_workfn(struct work_struct *work)
 {
-	if (atomic_read(&xg_boot_completed_seen))
+	if (atomic_cmpxchg(&xg_delayed_enforced, 0, 1) != 0)
 		return;
 
-	if (atomic_cmpxchg(&xg_fallback_enforced, 0, 1) != 0)
-		return;
-
-	xg_enter_enforced("3min fallback", NULL);
+	xg_enter_enforced(atomic_read(&xg_ota_audit_delay_seen) ?
+			      "15min snapshot/COW audit delay" :
+			      "5min delayed enforce",
+			  NULL);
 }
 
 static void xg_watchdog_report(const char *area, const char *name,
@@ -2843,6 +3037,7 @@ late_initcall(xg_watchdog_start);
 
 static int __init xg_stage_arm_late(void)
 {
+	unsigned int delay_ms;
 	int ret;
 
 	xg_sysfs_kobj = kobject_create_and_add("xingguang_ddk", kernel_kobj);
@@ -2857,10 +3052,17 @@ static int __init xg_stage_arm_late(void)
 			pr_info(XG_TAG ": sysfs ready at /sys/kernel/xingguang_ddk\n");
 	}
 
-	INIT_DELAYED_WORK(&xg_boot_fallback_work, xg_boot_fallback_workfn);
+	INIT_DELAYED_WORK(&xg_delayed_enforce_work,
+			  xg_delayed_enforce_workfn);
 	xg_advance_stage(XG_STAGE_BOOT_AUDIT, "late_initcall", NULL);
-	queue_delayed_work(system_wq, &xg_boot_fallback_work,
-			   msecs_to_jiffies(XG_BOOT_FALLBACK_MS));
+	atomic_set(&xg_delayed_enforce_ready, 1);
+	delay_ms = atomic_read(&xg_ota_audit_delay_seen) ?
+		       XG_OTA_AUDIT_DELAY_MS :
+		       XG_DELAYED_ENFORCE_MS;
+	queue_delayed_work(system_wq, &xg_delayed_enforce_work,
+			   msecs_to_jiffies(delay_ms));
+	pr_info(XG_TAG ": delayed enforcement armed delay_ms=%u ota=%d\n",
+		delay_ms, atomic_read(&xg_ota_audit_delay_seen) ? 1 : 0);
 
 	return 0;
 }
