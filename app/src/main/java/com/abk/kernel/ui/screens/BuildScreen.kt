@@ -50,6 +50,9 @@ fun BuildScreen(vm: MainViewModel) {
     val osPatchOptions = remember(config.androidVersion, config.kernelVersion, config.subLevel) {
         KernelSupport.patchLevelOptions(config.androidVersion, config.kernelVersion, config.subLevel)
     }
+    val versionPreview = remember(config.version, config.kernelVersion, config.subLevel) {
+        buildVersionPreview(config)
+    }
     var showConfirmDialog by remember { mutableStateOf(false) }
     var customModuleUrl by remember { mutableStateOf("") }
     var customModuleStage by remember { mutableStateOf(CustomExternalModuleStage.AFTER_PATCH) }
@@ -375,6 +378,7 @@ fun BuildScreen(vm: MainViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+                VersionPreviewText(versionPreview)
                 OutlinedTextField(
                     value = config.buildTime,
                     onValueChange = { vm.updateBuildConfig(config.copy(buildTime = it)) },
@@ -434,6 +438,35 @@ fun BuildScreen(vm: MainViewModel) {
 }
 
 @Composable
+private fun VersionPreviewText(preview: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Default.Visibility,
+                null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(17.dp)
+            )
+            Text(
+                preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun BuildPlanHero(
     config: KernelBuildConfig,
     recommended: KernelBuildConfig?,
@@ -469,6 +502,16 @@ private fun BuildPlanHero(
             )
         }
     )
+}
+
+private fun buildVersionPreview(config: KernelBuildConfig): String {
+    val compact = config.version.filterNot { it.isWhitespace() }
+    if (compact.isBlank()) {
+        return "预览：留空时使用工作流默认本地版本"
+    }
+    val cleanVersion = compact.replace(Regex("""^[0-9]+\.[0-9]+\.[0-9]+"""), "")
+    val preview = "${config.kernelVersion}.${config.subLevel}$cleanVersion"
+    return "预览：$preview"
 }
 
 @Composable
