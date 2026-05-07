@@ -1,9 +1,15 @@
 package com.abk.kernel
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -65,6 +71,8 @@ import com.abk.kernel.ui.screens.StatusScreen
 import com.abk.kernel.ui.theme.AbkTheme
 import com.abk.kernel.viewmodel.AuthStep
 import com.abk.kernel.viewmodel.MainViewModel
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.flow.collect
 
 class MainActivity : ComponentActivity() {
 
@@ -218,9 +226,30 @@ private enum class AbkTab(val label: String) {
 @Composable
 private fun AbkMainScaffold(vm: MainViewModel) {
     val state by vm.uiState.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var selectedTab by rememberSaveable { mutableStateOf(AbkTab.Status) }
+    var lastBackAt by remember { mutableStateOf(0L) }
     val visibleTabs = AbkTab.entries
     val activeTab = selectedTab
+
+    fun handleTopLevelBack() {
+        val now = System.currentTimeMillis()
+        if (now - lastBackAt <= EXIT_BACK_INTERVAL_MS) {
+            context.findActivity()?.finish()
+        } else {
+            lastBackAt = now
+            Toast.makeText(context, "再按一次退出 AnyBase Kernel", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    BackHandler(onBack = ::handleTopLevelBack)
+    PredictiveBackHandler { progress ->
+        try {
+            progress.collect { }
+            handleTopLevelBack()
+        } catch (_: CancellationException) {
+        }
+    }
 
     if (state.showWorkflowEnableDialog) {
         WorkflowEnableDialog(
@@ -361,3 +390,11 @@ private fun AbkTab.displayLabel(rootGranted: Boolean): String = when (this) {
     AbkTab.Flash -> if (rootGranted) label else "文件"
     else -> label
 }
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private const val EXIT_BACK_INTERVAL_MS = 2_000L

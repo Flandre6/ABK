@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -101,7 +103,9 @@ import com.abk.kernel.ui.components.ExpressiveTopBar
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.RootUtils
 import com.abk.kernel.viewmodel.MainViewModel
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -134,6 +138,19 @@ fun FlashScreen(vm: MainViewModel) {
         buildWorkflowGroups(remoteArtifacts, state.downloadedArtifacts)
     }
     val selectedGroup = selectedRunId?.let { id -> workflowGroups.firstOrNull { it.runId == id } }
+
+    fun returnToWorkflowList() {
+        selectedRunId = null
+    }
+
+    BackHandler(enabled = selectedRunId != null, onBack = ::returnToWorkflowList)
+    PredictiveBackHandler(enabled = selectedRunId != null) { progress ->
+        try {
+            progress.collect { }
+            returnToWorkflowList()
+        } catch (_: CancellationException) {
+        }
+    }
 
     LaunchedEffect(state.forkRepo?.fullName) {
         if (state.forkRepo != null) vm.loadRecentRuns()
@@ -404,7 +421,7 @@ fun FlashScreen(vm: MainViewModel) {
                 item {
                     WorkflowDetailHeader(
                         group = selectedGroup,
-                        onBack = { selectedRunId = null },
+                        onBack = ::returnToWorkflowList,
                         onDelete = {
                             deleteWorkflowTarget = selectedGroup
                             deleteRemoteWorkflowRun = false
