@@ -58,7 +58,7 @@ fun StatusScreen(vm: MainViewModel) {
                 if (state.rootGranted) RootUtils.getKsuVersion() else "N/A"
             }
             val kernelVersion = remember(state.rootGranted) {
-                if (state.rootGranted) RootUtils.getKernelVersion() else "Unknown"
+                RootUtils.getKernelVersion()
             }
 
             ExpressiveHeroCard(

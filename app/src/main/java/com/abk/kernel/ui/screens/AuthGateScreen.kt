@@ -89,7 +89,7 @@ private fun RootCheckScreen(isLoading: Boolean, onRequestRoot: () -> Unit) {
         )
         ExpressiveSectionCard(
             title = "ABK 将在本机确认能力",
-            subtitle = "只在需要刷写、安装模块和识别内核时调用 Root。其余 GitHub 操作通过授权 token 完成。",
+            subtitle = "只在需要刷写、安装模块和检测 Root 相关能力时调用 Root。内核版本识别不依赖 Root。",
             icon = Icons.Default.Security
         ) {
             Text(

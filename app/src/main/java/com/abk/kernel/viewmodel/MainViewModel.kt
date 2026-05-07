@@ -239,16 +239,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val shouldAdvance = _uiState.value.authStep != AuthStep.READY
             val granted = RootUtils.isRootAvailable()
-            val recommended = if (granted) detectRecommendedBuildConfig() else null
+            val recommended = detectRecommendedBuildConfig()
+            val initialConfig = applyInitialBuildConfigIfNeeded(recommended)
             _uiState.update {
                 it.copy(
                     rootGranted = granted,
                     recommendedBuildConfig = recommended,
-                    buildConfig = if (granted && !hasSavedBuildConfig && recommended != null) {
-                        recommended
-                    } else {
-                        it.buildConfig
-                    }
+                    buildConfig = initialConfig ?: it.buildConfig
                 )
             }
             if (shouldAdvance) advanceStep()
@@ -260,21 +257,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val shouldAdvance = _uiState.value.authStep != AuthStep.READY
             _uiState.update { it.copy(isLoading = true) }
             val granted = RootUtils.requestRoot()
-            val recommended = if (granted) detectRecommendedBuildConfig() else null
+            val recommended = detectRecommendedBuildConfig()
+            val initialConfig = applyInitialBuildConfigIfNeeded(recommended)
             _uiState.update {
                 it.copy(
                     rootGranted = granted,
                     isLoading = false,
                     recommendedBuildConfig = recommended,
-                    buildConfig = if (granted && !hasSavedBuildConfig && recommended != null) {
-                        recommended
-                    } else {
-                        it.buildConfig
-                    }
+                    buildConfig = initialConfig ?: it.buildConfig
                 )
             }
             if (shouldAdvance) advanceStep()
         }
+    }
+
+    private suspend fun applyInitialBuildConfigIfNeeded(recommended: KernelBuildConfig?): KernelBuildConfig? {
+        if (recommended == null || hasSavedBuildConfig) return null
+        val savedJson = prefs.buildConfigJson.first()
+        if (!savedJson.isNullOrBlank()) {
+            hasSavedBuildConfig = true
+            return null
+        }
+        val normalized = KernelSupport.normalize(recommended)
+        hasSavedBuildConfig = true
+        prefs.saveBuildConfigJson(gson.toJson(normalized))
+        return normalized
     }
 
     private fun advanceStep() {
@@ -1151,8 +1158,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-private fun detectRecommendedBuildConfig(): KernelBuildConfig {
-    return KernelSupport.recommendedFromKernel(RootUtils.getKernelVersion())
+private fun detectRecommendedBuildConfig(): KernelBuildConfig? {
+    val kernelVersion = RootUtils.getKernelVersion()
+    if (kernelVersion.isBlank() || kernelVersion.equals("Unknown", ignoreCase = true)) return null
+    return KernelSupport.recommendedFromKernel(kernelVersion)
 }
 
 private fun WorkflowRun.isActiveBuildRun(): Boolean =

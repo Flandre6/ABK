@@ -138,8 +138,19 @@ object RootUtils {
     }
 
     fun getKernelVersion(): String {
-        val result = Shell.cmd("uname -r").exec()
-        return if (result.isSuccess) result.out.firstOrNull() ?: "Unknown" else "Unknown"
+        val systemVersion = System.getProperty("os.version")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (systemVersion != null) return systemVersion
+
+        return runCatching {
+            val process = ProcessBuilder("uname", "-r")
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readLine()?.trim() }
+            process.waitFor()
+            output?.takeIf { it.isNotBlank() } ?: "Unknown"
+        }.getOrDefault("Unknown")
     }
 
     fun getKsuVersion(): String {
