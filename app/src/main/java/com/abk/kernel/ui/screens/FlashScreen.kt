@@ -1,5 +1,9 @@
 package com.abk.kernel.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -28,6 +32,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
@@ -43,7 +48,6 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.RunCircle
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
@@ -148,18 +152,10 @@ fun FlashScreen(vm: MainViewModel) {
         showTerminal = true
     }
 
-    fun openDownloadedFile(item: DownloadedArtifact) {
-        val ok = DownloadUtils.openFile(context, item.filePath)
-        if (!ok) {
-            showFailure(
-                "无法分享文件",
-                listOf(
-                    "${'$'} share ${item.filePath}",
-                    "系统分享面板不可用，或 FileProvider 授权失败。",
-                    "文件: ${item.name}"
-                )
-            )
-        }
+    fun copyDownloadedFilePath(item: DownloadedArtifact) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(item.name, item.filePath))
+        Toast.makeText(context, "已复制文件路径", Toast.LENGTH_SHORT).show()
     }
 
     fun installManager(item: DownloadedArtifact) {
@@ -444,7 +440,7 @@ fun FlashScreen(vm: MainViewModel) {
                                 state.pendingAutoDownloadRunId == artifact.runId &&
                                 DownloadUtils.shouldAutoDownload(artifact),
                             onDownload = { vm.downloadArtifact(artifact) },
-                            onOpen = ::openDownloadedFile,
+                            onCopyPath = ::copyDownloadedFilePath,
                             onInstall = ::installManager,
                             onFlash = {
                                 selectedItem = it
@@ -458,7 +454,7 @@ fun FlashScreen(vm: MainViewModel) {
                     items(localOnly, key = { "local-${it.filePath}" }) { artifact ->
                         LocalOnlyArtifactCard(
                             artifact = artifact,
-                            onOpen = ::openDownloadedFile,
+                            onCopyPath = ::copyDownloadedFilePath,
                             onInstall = ::installManager,
                             onFlash = {
                                 selectedItem = it
@@ -642,7 +638,7 @@ private fun ArtifactSourceCard(
     progress: Int?,
     autoDownloadEligible: Boolean,
     onDownload: () -> Unit,
-    onOpen: (DownloadedArtifact) -> Unit,
+    onCopyPath: (DownloadedArtifact) -> Unit,
     onInstall: (DownloadedArtifact) -> Unit,
     onFlash: (DownloadedArtifact) -> Unit,
     onDelete: (DownloadedArtifact) -> Unit,
@@ -692,7 +688,7 @@ private fun ArtifactSourceCard(
                         if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         DownloadedOutputRow(
                             artifact = file,
-                            onOpen = { onOpen(file) },
+                            onCopyPath = { onCopyPath(file) },
                             onInstall = { onInstall(file) },
                             onFlash = { onFlash(file) },
                             onDelete = { onDelete(file) },
@@ -708,7 +704,7 @@ private fun ArtifactSourceCard(
 @Composable
 private fun LocalOnlyArtifactCard(
     artifact: DownloadedArtifact,
-    onOpen: (DownloadedArtifact) -> Unit,
+    onCopyPath: (DownloadedArtifact) -> Unit,
     onInstall: (DownloadedArtifact) -> Unit,
     onFlash: (DownloadedArtifact) -> Unit,
     onDelete: (DownloadedArtifact) -> Unit,
@@ -729,7 +725,7 @@ private fun LocalOnlyArtifactCard(
             )
             DownloadedOutputRow(
                 artifact = artifact,
-                onOpen = { onOpen(artifact) },
+                onCopyPath = { onCopyPath(artifact) },
                 onInstall = { onInstall(artifact) },
                 onFlash = { onFlash(artifact) },
                 onDelete = { onDelete(artifact) },
@@ -776,7 +772,7 @@ private fun ArtifactHeader(
 @Composable
 private fun DownloadedOutputRow(
     artifact: DownloadedArtifact,
-    onOpen: () -> Unit,
+    onCopyPath: () -> Unit,
     onInstall: () -> Unit,
     onFlash: () -> Unit,
     onDelete: () -> Unit,
@@ -814,13 +810,13 @@ private fun DownloadedOutputRow(
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
-                onClick = onOpen,
+                onClick = onCopyPath,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.weight(1f).height(42.dp)
             ) {
-                Icon(Icons.Default.Share, null, modifier = Modifier.size(17.dp))
+                Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("分享文件")
+                Text("复制路径")
             }
             if (allowRootActions) {
                 when (artifact.type) {

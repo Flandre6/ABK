@@ -5,7 +5,6 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.os.Environment
-import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import com.abk.kernel.data.model.Artifact
 import com.abk.kernel.data.model.ArtifactCategory
@@ -256,21 +255,6 @@ object DownloadUtils {
         }.getOrDefault(ArtifactType.OTHER)
     }
 
-    fun openFile(context: Context, filePath: String): Boolean {
-        val file = File(filePath)
-        if (!file.exists()) return false
-        return runCatching {
-            val uri = FileProvider.getUriForFile(
-                context, "${context.packageName}.fileprovider", file
-            )
-            val mimeType = guessMimeType(file)
-            context.startActivityChooser(
-                buildSendIntent(context, uri, mimeType, file.name),
-                "分享文件"
-            )
-        }.getOrDefault(false)
-    }
-
     fun installApk(context: Context, filePath: String): Boolean {
         val file = File(filePath)
         if (!file.exists()) return false
@@ -288,15 +272,6 @@ object DownloadUtils {
             }
             context.startActivitySafely(viewIntent) || context.startActivitySafely(installIntent)
         }.getOrDefault(false)
-    }
-
-    private fun Context.startActivityChooser(intent: Intent, title: String): Boolean {
-        val chooser = Intent.createChooser(intent, title).apply {
-            clipData = intent.clipData
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        return startActivitySafely(chooser)
     }
 
     private fun Context.startActivitySafely(intent: Intent): Boolean {
@@ -322,36 +297,6 @@ object DownloadUtils {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-
-    private fun buildSendIntent(
-        context: Context,
-        uri: android.net.Uri,
-        mimeType: String,
-        label: String
-    ): Intent =
-        Intent(Intent.ACTION_SEND).apply {
-            type = mimeType
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = ClipData.newUri(context.contentResolver, label, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
-    private fun guessMimeType(file: File): String {
-        val lowerName = file.name.lowercase(Locale.ROOT)
-        return when {
-            lowerName.endsWith(".apk") -> "application/vnd.android.package-archive"
-            lowerName.endsWith(".zip") -> "application/zip"
-            lowerName.endsWith(".img") -> "application/octet-stream"
-            lowerName.endsWith(".gz") -> "application/gzip"
-            lowerName.endsWith(".xz") -> "application/x-xz"
-            lowerName.endsWith(".tar") -> "application/x-tar"
-            lowerName.endsWith(".log") || lowerName.endsWith(".txt") -> "text/plain"
-            else -> MimeTypeMap.getSingleton()
-                .getMimeTypeFromExtension(file.extension.lowercase(Locale.ROOT))
-                ?: "application/octet-stream"
-        }
-    }
 
     fun formatSize(bytes: Long): String {
         return when {
