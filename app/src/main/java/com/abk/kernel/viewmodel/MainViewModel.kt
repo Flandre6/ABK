@@ -476,35 +476,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val owner = state.user?.login ?: return
         val repo = state.forkRepo ?: return
         hasShownWorkflowEnablePrompt = true
-        _uiState.update {
-            it.copy(
-                showWorkflowEnableDialog = true,
-                workflowEnableChecking = true,
-                workflowEnableMessage = "正在通过 GitHub API 检查并启用构建工作流...",
-                workflowActionsUrl = "${repo.htmlUrl}/actions"
-            )
-        }
         viewModelScope.launch {
-            val message = when (val workflow = github.getWorkflow(owner, repo.name, KERNEL_WORKFLOW_FILE)) {
+            when (val workflow = github.getWorkflow(owner, repo.name, KERNEL_WORKFLOW_FILE)) {
                 is Result.Success -> {
                     if (workflow.data.state == "active") {
-                        "构建工作流已处于启用状态。首次使用仍建议打开 Actions 页面确认 GitHub 是否要求手动启用。"
-                    } else {
-                        when (val enabled = github.enableWorkflow(owner, repo.name, workflow.data.id)) {
-                            is Result.Success -> "已通过 GitHub API 请求启用构建工作流。请打开 Actions 页面确认工作流状态。"
-                            is Result.Error -> "自动启用工作流失败: ${enabled.message}。请打开 Actions 页面手动启用。"
-                            Result.Loading -> "正在启用构建工作流..."
-                        }
+                        return@launch
+                    }
+                    _uiState.update {
+                        it.copy(
+                            showWorkflowEnableDialog = true,
+                            workflowEnableChecking = true,
+                            workflowEnableMessage = "正在通过 GitHub API 启用构建工作流...",
+                            workflowActionsUrl = "${repo.htmlUrl}/actions"
+                        )
+                    }
+                    val message = when (val enabled = github.enableWorkflow(owner, repo.name, workflow.data.id)) {
+                        is Result.Success -> "已通过 GitHub API 请求启用构建工作流。请打开 Actions 页面确认工作流状态。"
+                        is Result.Error -> "自动启用工作流失败: ${enabled.message}。请打开 Actions 页面手动启用。"
+                        Result.Loading -> "正在启用构建工作流..."
+                    }
+                    _uiState.update {
+                        it.copy(
+                            workflowEnableChecking = false,
+                            workflowEnableMessage = message
+                        )
                     }
                 }
-                is Result.Error -> "无法检查构建工作流: ${workflow.message}。请打开 Actions 页面确认 fork 已同步。"
-                Result.Loading -> "正在检查构建工作流..."
-            }
-            _uiState.update {
-                it.copy(
-                    workflowEnableChecking = false,
-                    workflowEnableMessage = message
-                )
+                is Result.Error -> {}
+                Result.Loading -> {}
             }
         }
     }
