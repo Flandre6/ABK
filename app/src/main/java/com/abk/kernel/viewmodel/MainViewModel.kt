@@ -481,16 +481,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val repo = state.forkRepo ?: return
         hasCheckedWorkflowEnablementThisLaunch = true
         viewModelScope.launch {
-            when (val workflow = github.getWorkflow(owner, repo.name, KERNEL_WORKFLOW_FILE)) {
-                is Result.Success -> {
-                    if (workflow.data.state == "active") {
-                        return@launch
+            ensureBuildWorkflowEnabled(owner, repo.name, reportError = false)
+        }
+    }
+
+    private suspend fun ensureBuildWorkflowEnabled(
+        owner: String,
+        repoName: String,
+        reportError: Boolean
+    ): Long? {
+        return when (val workflow = github.getWorkflow(owner, repoName, KERNEL_WORKFLOW_FILE)) {
+            is Result.Success -> {
+                if (workflow.data.state != "active") {
+                    when (val enabled = github.enableWorkflow(owner, repoName, workflow.data.id)) {
+                        is Result.Success -> {}
+                        is Result.Error -> {
+                            if (reportError) {
+                                _uiState.update { it.copy(isLoading = false, error = enabled.message) }
+                            }
+                            return null
+                        }
+                        Result.Loading -> {}
                     }
-                    github.enableWorkflow(owner, repo.name, workflow.data.id)
                 }
-                is Result.Error -> {}
-                Result.Loading -> {}
+                workflow.data.id
             }
+            is Result.Error -> {
+                if (reportError) {
+                    _uiState.update { it.copy(isLoading = false, error = workflow.message) }
+                }
+                null
+            }
+            Result.Loading -> null
         }
     }
 
@@ -504,13 +526,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val ref = state.forkRepo?.defaultBranch ?: "main"
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            val wfResult = github.getWorkflowId(username, repoName, KERNEL_WORKFLOW_FILE)
-            if (wfResult is Result.Error) {
-                _uiState.update { it.copy(isLoading = false, error = wfResult.message) }
-                return@launch
-            }
-            val wfId = (wfResult as Result.Success).data
-            github.enableWorkflow(username, repoName, wfId)
+            val wfId = ensureBuildWorkflowEnabled(username, repoName, reportError = true) ?: return@launch
             val previousRunId = when (val prior = github.listRecentRuns(username, repoName, 1, wfId)) {
                 is Result.Success -> prior.data.firstOrNull()?.id
                 else -> null
