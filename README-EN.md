@@ -53,6 +53,28 @@ You can also run the workflows manually from GitHub Actions.
 
 ## Risk Notice
 
+## 🧪 Droidspaces Container Support (Experimental)
+
+> **Experimental feature:** Successful build and boot is not guaranteed across all GKI versions. Always back up your boot image before flashing.
+>
+> **TIPS:** The workflow uses the [official Droidspaces patches](https://github.com/ravindu644/Droidspaces-OSS/tree/main/Documentation/resources/kernel-patches/GKI) from [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS). If you have better patches, feel free to open an issue. Since there are three patch variants, you may need to test them repeatedly to find one that fits your device. Choose based on other users' feedback or your own experience.
+
+[Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) is a lightweight Linux containerization tool that lets you run full Linux environments (with systemd, OpenRC, etc.) on Android — useful for development, running servers, and more.
+
+**Supported versions:** 5.10 / 5.15 / 6.1 / 6.6 / 6.12
+
+**Usage:** When triggering a build manually, select the `Droidspaces` option:
+
+| Option | Description |
+|:---:|:---|
+| `off` | Disabled (default) |
+| `678` | Use 6_7_8 slot patch (recommended) |
+| `123` | Use 1_2_3 slot patch (fallback) |
+| `345` | Use 3_4_5 slot patch (fallback) |
+
+> **Note:** Kernel 6.12 has only one patch — any non-off option will use it.
+
+**If the build fails or bootloops after flashing:** Try switching to a different slot patch (e.g. 678 → 123 or 345). Different kernel sub-levels may require different patches.
 - Flashing kernels is high-risk and may cause boot failure, data loss, or require restoring a stock boot image.
 - Do not build or flash if you are unsure about the target partition, kernel version, Android version, or security patch level.
 - OnePlus ColorOS 14 / 15 compatibility still needs device-side validation and may require data wiping in failure cases.
