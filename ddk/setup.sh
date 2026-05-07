@@ -86,7 +86,8 @@ inject_blkdev_ioctl_compat() {
 inject_compat_blkdev_ioctl_compat() {
 	file="$1"
 
-	perl -0pi -e 's/(long compat_blkdev_ioctl\s*\([^)]*\)\s*\{.*?\n\s*fmode_t mode = [^\n]+;\n)/$1\n\tret = xg_ddk_blkdev_ioctl(bdev, cmd);\n\tif (ret)\n\t\treturn ret;\n/s or die "compat_blkdev_ioctl anchor not found\n";' "$file" 2>/dev/null && return 0
+	perl -0pi -e 's/(long compat_blkdev_ioctl\s*\([^)]*\)\s*\{.*?\n\s*fmode_t mode = [^\n]+;\n)/$1\n\tret = xg_ddk_blkdev_ioctl(bdev, cmd);\n\tif (ret)\n\t\treturn ret;\n/s or die "compat_blkdev_ioctl fmode_t anchor not found\n";' "$file" 2>/dev/null && return 0
+	perl -0pi -e 's/(long compat_blkdev_ioctl\s*\([^)]*\)\s*\{.*?\n\s*blk_mode_t mode = [^\n]+;\n)/$1\n\tret = xg_ddk_blkdev_ioctl(bdev, cmd);\n\tif (ret)\n\t\treturn ret;\n/s or die "compat_blkdev_ioctl blk_mode_t anchor not found\n";' "$file" 2>/dev/null && return 0
 
 	echo "compat_blkdev_ioctl anchor not found"
 	return 1
