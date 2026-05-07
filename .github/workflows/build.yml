@@ -765,6 +765,17 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def preprocessor_delta(text):
+              opens = 0
+              closes = 0
+              for line in text.splitlines():
+                  stripped = line.strip()
+                  if stripped.startswith("#if"):
+                      opens += 1
+                  elif stripped.startswith("#endif"):
+                      closes += 1
+              return opens - closes
+
           kernel_dir = Path("KernelSU/kernel")
           ksu_c = kernel_dir / "ksu.c"
           tree_text = "\n".join(
@@ -821,7 +832,7 @@ jobs:
               guard = "#endif /* CONFIG_KSU_SUSFS */\n"
               if marker in text and guard not in text:
                   before_marker = text.split(marker, 1)[0]
-                  if before_marker.count("#if") > before_marker.count("#endif"):
+                  if preprocessor_delta(before_marker) > 0:
                       sucompat_c.write_text(text.replace(marker, "\n" + guard + marker, 1))
                       print("Closed missing SukiSU builtin CONFIG_KSU_SUSFS block in feature/sucompat.c")
 
@@ -1695,6 +1706,117 @@ jobs:
 
           if [ "$executed" -eq 0 ]; then
             echo "没有配置 $CUSTOM_EXTERNAL_MODULE_STAGE 阶段的自定义外部模块。"
+          fi
+
+      - name: 最终修复 SukiSU 源码兼容
+        if: inputs.ksu_variant == 'SukiSU'
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def preprocessor_delta(text):
+              opens = 0
+              closes = 0
+              for line in text.splitlines():
+                  stripped = line.strip()
+                  if stripped.startswith("#if"):
+                      opens += 1
+                  elif stripped.startswith("#endif"):
+                      closes += 1
+              return opens - closes
+
+          candidates = []
+          for base in (Path("common/drivers/kernelsu"), Path("drivers/kernelsu"), Path("KernelSU/kernel")):
+              if base.exists() and base not in candidates:
+                  candidates.append(base)
+
+          if not candidates:
+              raise SystemExit("未找到 SukiSU 源码目录，无法执行最终兼容修复")
+
+          changed = False
+
+          for kernel_dir in candidates:
+              print(f"检查 SukiSU 源码目录: {kernel_dir}")
+
+              sucompat_c = kernel_dir / "feature/sucompat.c"
+              if sucompat_c.exists():
+                  text = sucompat_c.read_text()
+                  marker = "\n// dead code\n"
+                  guard = "#endif /* CONFIG_KSU_SUSFS */\n"
+                  if marker in text and guard not in text:
+                      before_marker = text.split(marker, 1)[0]
+                      if preprocessor_delta(before_marker) > 0:
+                          sucompat_c.write_text(text.replace(marker, "\n" + guard + marker, 1))
+                          changed = True
+                          print(f"  已补齐 {sucompat_c} 的 CONFIG_KSU_SUSFS 结束符")
+
+              sulog_event_c = kernel_dir / "sulog/event.c"
+              if sulog_event_c.exists():
+                  text = sulog_event_c.read_text()
+                  old = "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);"
+                  new = "\n".join([
+                      "    /* ABK: builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer. */",
+                      "#ifdef CONFIG_KSU_SUSFS",
+                      "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, NULL, gfp);",
+                      "#else",
+                      "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
+                      "#endif",
+                  ])
+                  if old in text and "builtin SUSFS ksu_sulog_capture()" not in text:
+                      sulog_event_c.write_text(text.replace(old, new, 1))
+                      changed = True
+                      print(f"  已修复 {sulog_event_c} 的 grant_root argv 参数类型")
+
+          if not changed:
+              print("SukiSU 源码兼容修复无需修改。")
+          PY
+
+          KSU_BUILD_DIR=""
+          for dir in common/drivers/kernelsu drivers/kernelsu KernelSU/kernel; do
+            if [ -d "$dir" ]; then
+              KSU_BUILD_DIR="$dir"
+              break
+            fi
+          done
+
+          if [ -z "$KSU_BUILD_DIR" ]; then
+            echo "::error::未找到实际 SukiSU 编译目录"
+            exit 1
+          fi
+
+          if [ -f "$KSU_BUILD_DIR/feature/sucompat.c" ]; then
+            python3 - "$KSU_BUILD_DIR/feature/sucompat.c" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+          marker = "\n// dead code\n"
+          if marker in text:
+              before_marker = text.split(marker, 1)[0]
+              opens = 0
+              closes = 0
+              for line in before_marker.splitlines():
+                  stripped = line.strip()
+                  if stripped.startswith("#if"):
+                      opens += 1
+                  elif stripped.startswith("#endif"):
+                      closes += 1
+              if opens > closes:
+                  raise SystemExit(f"SukiSU sucompat.c 仍缺少 CONFIG_KSU_SUSFS 结束符: {path}")
+          PY
+          fi
+
+          if [ -f "$KSU_BUILD_DIR/sulog/event.c" ]; then
+            if grep -qF 'struct user_arg_ptr *argv_user' "$KSU_BUILD_DIR/sulog/event.c" \
+              && grep -qF 'NULL, USER_ARG_NULL, gfp' "$KSU_BUILD_DIR/sulog/event.c" \
+              && ! grep -qF 'builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer' "$KSU_BUILD_DIR/sulog/event.c"; then
+              echo "::error::SukiSU sulog/event.c 仍存在 argv 参数类型不兼容调用: $KSU_BUILD_DIR/sulog/event.c"
+              exit 1
+            fi
           fi
 
       - name: 编译内核
