@@ -1004,6 +1004,15 @@ jobs:
               if [[ "$CURRENT_SUB" -le 41 ]]; then
                 cp $KERNEL_PATCHES/wild/susfs_fix_patches/v${SUSFS_VERSION}/a13-5.15/namespace.c.patch ./
                 patch -p1 < namespace.c.patch || true
+                if [[ "$CURRENT_SUB" -eq 41 ]] && grep -qF 'static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)' ./fs/namespace.c; then
+                  if grep -qF 'extern bool susfs_is_sdcard_android_data_decrypted __read_mostly;' ./fs/namespace.c \
+                    && ! grep -qF 'extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;' ./fs/namespace.c; then
+                    sed -i 's/extern bool susfs_is_sdcard_android_data_decrypted __read_mostly;/extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;/' ./fs/namespace.c
+                  elif ! grep -qF 'extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;' ./fs/namespace.c; then
+                    sed -i '/extern bool susfs_is_current_ksu_domain(void);/a extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;' ./fs/namespace.c
+                  fi
+                  echo "已修复 android13-5.15.41 namespace.c 的 SUSFS sdcard static key 声明"
+                fi
                 cp $KERNEL_PATCHES/wild/susfs_fix_patches/v${SUSFS_VERSION}/a13-5.15/fdinfo.c.patch ./
                 patch -p1 < fdinfo.c.patch || true
                 cp $KERNEL_PATCHES/wild/susfs_fix_patches/v${SUSFS_VERSION}/a13-5.15/open.c.patch ./
