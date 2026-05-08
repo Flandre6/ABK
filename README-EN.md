@@ -217,6 +217,7 @@ ABK continues development on top of the following projects, repositories, and co
 - Baseband Guard: [vc-teahouse/Baseband-guard](https://github.com/vc-teahouse/Baseband-guard)
 - Re-Kernel: [Sakion-Team/Re-Kernel](https://github.com/Sakion-Team/Re-Kernel)
 - KernelSU website: https://kernelsu.org/
+- NTsync，setip和BBR来源： [WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patche) PR by [huime180](https://github.com/huime180)
 
 ## License
 
