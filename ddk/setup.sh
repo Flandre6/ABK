@@ -51,6 +51,118 @@ function_has_call_name() {
 	' "$file"
 }
 
+inject_function_entry_guard() {
+	file="$1"
+	name="$2"
+	marker="$3"
+	call="$4"
+
+	python3 - "$file" "$name" "$marker" "$call" <<'PY'
+import re
+import sys
+
+path, name, marker, call = sys.argv[1:]
+
+with open(path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+sig_re = re.compile(
+    r"^\s*(?:[A-Za-z_][\w\s\*]*\s+)+" + re.escape(name) + r"\s*\("
+)
+brace_line = None
+i = 0
+while i < len(lines):
+    if sig_re.search(lines[i]):
+        j = i
+        while j < len(lines):
+            if ";" in lines[j] and "{" not in lines[j]:
+                break
+            if "{" in lines[j]:
+                brace_line = j
+                break
+            j += 1
+        if brace_line is not None:
+            break
+        i = j
+    i += 1
+
+if brace_line is None:
+    raise SystemExit(f"{name} anchor not found")
+
+depth = 0
+end_line = None
+for i in range(brace_line, len(lines)):
+    depth += lines[i].count("{") - lines[i].count("}")
+    if i > brace_line and depth == 0:
+        end_line = i + 1
+        break
+
+if end_line is None:
+    raise SystemExit(f"{name} body end not found")
+
+if marker in "".join(lines[brace_line:end_line]):
+    raise SystemExit(0)
+
+decl_re = re.compile(
+    r"^\s*(?:"
+    r"const\s+|volatile\s+|static\s+|struct\s+|union\s+|enum\s+|"
+    r"unsigned\s+|signed\s+|long\s+|short\s+|int\s+|bool\s+|char\s+|"
+    r"void\s+|size_t\s+|ssize_t\s+|loff_t\s+|sector_t\s+|gfp_t\s+|"
+    r"blk_mode_t\s+|fmode_t\s+|umode_t\s+|u\d+\s+|s\d+\s+|"
+    r"[A-Za-z_]\w*_t\s+|[A-Za-z_]\w+\s+\*"
+    r")"
+)
+
+decl_end = brace_line + 1
+in_decl = False
+in_comment = False
+while decl_end < end_line:
+    stripped = lines[decl_end].strip()
+    if in_comment:
+        if "*/" in stripped:
+            in_comment = False
+        decl_end += 1
+        continue
+    if stripped == "":
+        decl_end += 1
+        continue
+    if stripped.startswith("/*"):
+        if "*/" not in stripped:
+            in_comment = True
+        decl_end += 1
+        continue
+    if in_decl:
+        if ";" in stripped:
+            in_decl = False
+        decl_end += 1
+        continue
+    if decl_re.match(lines[decl_end]):
+        if ";" not in stripped:
+            in_decl = True
+        decl_end += 1
+        continue
+    break
+
+guard = [
+    f"\txg_ddk_ret = {call};\n",
+    "\tif (xg_ddk_ret)\n",
+    "\t\treturn xg_ddk_ret;\n",
+    "\n",
+]
+
+new_lines = (
+    lines[: brace_line + 1]
+    + ["\tint xg_ddk_ret;\n"]
+    + lines[brace_line + 1 : decl_end]
+    + guard
+    + lines[decl_end:]
+)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.writelines(new_lines)
+PY
+}
+
 ensure_ddk_include() {
 	file="$1"
 	include='#include <linux/xingguang_ddk.h>'
@@ -144,27 +256,32 @@ apply_ddk_0030_compat() {
 		inject_compat_blkdev_ioctl_compat "$ioctl_file" || return 1
 	fi
 
-	if ! function_has_call "$blk_lib_file" "int __blkdev_issue_discard" "xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects)"; then
-		if function_has_call "$blk_lib_file" "int __blkdev_issue_discard" "int ret;"; then
-			perl -0pi -e 's/(int __blkdev_issue_discard\s*\([^)]*\)\s*\{.*?\n)(\s*if \(bdev_read_only\(bdev\)\))/$1\tret = xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects);\n\tif (ret)\n\t\treturn ret;\n\n$2/s or die "__blkdev_issue_discard anchor not found\n";' "$blk_lib_file" || return 1
-		else
-			perl -0pi -e 's/(int __blkdev_issue_discard\s*\([^)]*\)\s*\{.*?\n\s*sector_t bs_mask;\n)(\s*if \(bdev_read_only\(bdev\)\))/$1\tint ret;\n\n\tret = xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects);\n\tif (ret)\n\t\treturn ret;\n\n$2/s or die "__blkdev_issue_discard anchor not found\n";' "$blk_lib_file" || return 1
-		fi
+	if ! function_has_call_name "$blk_lib_file" "__blkdev_issue_discard" "xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects)"; then
+		inject_function_entry_guard \
+			"$blk_lib_file" "__blkdev_issue_discard" \
+			"xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects)" \
+			"xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects)" || return 1
 	fi
 
-	if ! function_has_call "$blk_lib_file" "int __blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)"; then
-		perl -0pi -e 's/(int __blkdev_issue_zeroout\s*\([^)]*\)\s*\{.*?\n\s*sector_t bs_mask;\n)(\s*bs_mask = )/$1\n\tret = xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects);\n\tif (ret)\n\t\treturn ret;\n\n$2/s or die "__blkdev_issue_zeroout anchor not found\n";' "$blk_lib_file" || return 1
+	if ! function_has_call_name "$blk_lib_file" "__blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)"; then
+		inject_function_entry_guard \
+			"$blk_lib_file" "__blkdev_issue_zeroout" \
+			"xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" \
+			"xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
 	fi
 
-	if ! function_has_call "$blk_lib_file" "int blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)"; then
-		perl -0pi -e 's/(int blkdev_issue_zeroout\s*\([^)]*\)\s*\{.*?\n\s*bool try_write_zeroes = !!bdev_write_zeroes_sectors\(bdev\);\n)(\s*bs_mask = )/$1\n\tret = xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects);\n\tif (ret)\n\t\treturn ret;\n\n$2/s or die "blkdev_issue_zeroout anchor not found\n";' "$blk_lib_file" || return 1
+	if ! function_has_call_name "$blk_lib_file" "blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)"; then
+		inject_function_entry_guard \
+			"$blk_lib_file" "blkdev_issue_zeroout" \
+			"xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" \
+			"xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
 	fi
 
 	function_has_call_name "$ioctl_file" "blkdev_ioctl" "xg_ddk_blkdev_ioctl(bdev, cmd)" || return 1
 	function_has_call_name "$ioctl_file" "compat_blkdev_ioctl" "xg_ddk_blkdev_ioctl(bdev, cmd)" || return 1
-	function_has_call "$blk_lib_file" "int __blkdev_issue_discard" "xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects)" || return 1
-	function_has_call "$blk_lib_file" "int __blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
-	function_has_call "$blk_lib_file" "int blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
+	function_has_call_name "$blk_lib_file" "__blkdev_issue_discard" "xg_ddk_blkdev_issue_discard(bdev, sector, nr_sects)" || return 1
+	function_has_call_name "$blk_lib_file" "__blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
+	function_has_call_name "$blk_lib_file" "blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
 }
 
 echo "[+] Setting up Xingguang DDK LSM"

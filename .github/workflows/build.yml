@@ -1309,15 +1309,18 @@ jobs:
           cp -r $SUKISU_PATCHES/other/zram/lz4k/crypto/* ./crypto/
           cp -r $SUKISU_PATCHES/other/zram/lz4k_oplus ./lib/
 
-          cp $SUKISU_PATCHES/other/zram/zram_patch/${{ inputs.kernel_version }}/lz4kd.patch ./
-          if ! patch -p1 -F 3 < lz4kd.patch; then
-            echo "::warning::lz4kd.patch 应用失败，可能已应用或上下文不匹配"
-          fi
+          for zram_patch_name in lz4kd.patch lz4k_oplus.patch; do
+            zram_patch_file="$SUKISU_PATCHES/other/zram/zram_patch/${{ inputs.kernel_version }}/$zram_patch_name"
+            if [ ! -f "$zram_patch_file" ]; then
+              echo "::warning::$zram_patch_name 不存在，跳过 ${{ inputs.kernel_version }} 的 SukiSU ZRAM 集成补丁"
+              continue
+            fi
 
-          cp $SUKISU_PATCHES/other/zram/zram_patch/${{ inputs.kernel_version }}/lz4k_oplus.patch ./
-          if ! patch -p1 -F 3 < lz4k_oplus.patch; then
-            echo "::warning::lz4k_oplus.patch 应用失败，可能已应用或上下文不匹配"
-          fi
+            cp "$zram_patch_file" ./
+            if ! patch -p1 -F 3 < "$zram_patch_name"; then
+              echo "::warning::$zram_patch_name 应用失败，可能已应用或上下文不匹配"
+            fi
+          done
 
       - name: 修复 6.6 WiFi/蓝牙兼容性（三星 + 小米）
         if: inputs.kernel_version == '6.6'
