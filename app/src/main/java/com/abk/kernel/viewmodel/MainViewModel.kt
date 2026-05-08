@@ -1212,6 +1212,8 @@ private fun KernelBuildConfig.toInputMap(): Map<String, String> = mapOf(
     "use_zram" to useZram.toString(),
     "use_bbg" to useBbg.toString(),
     "use_ddk" to useDdk.toString(),
+    "use_ntsync" to useNtsync.toString(),
+    "use_networking" to useNetworking.toString(),
     "use_kpm" to useKpm.toString(),
     "use_rekernel" to useRekernel.toString(),
     "cancel_susfs" to cancelSusfs.toString(),
