@@ -192,112 +192,102 @@ jobs:
       use_custom_external_modules: ${{ inputs.use_custom_external_modules }}
       custom_external_modules: ${{ inputs.custom_external_modules || '' }}
 
-  release-full-feature-matrix:
-    name: 发布全属性矩阵产物
+  trigger-full-feature-release:
+    name: 触发全属性矩阵 Release 补发
     needs:
       - prepare-matrix
       - build-full-feature-matrix
     if: ${{ needs.prepare-matrix.outputs.count != '0' && needs.build-full-feature-matrix.result == 'success' && github.repository == 'xingguangcuican6666/ABK' }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      actions: read
+      contents: read
+      actions: write
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
+      KSU_VARIANT: ${{ inputs.kernelsu_variant }}
+      KSU_BRANCH: ${{ inputs.kernelsu_branch }}
+      BUILD_TIME: ${{ inputs.build_time || '当前 UTC' }}
+      KPM_PASSWORD: ${{ inputs.kpm_password || '' }}
+      USE_CUSTOM_EXTERNAL_MODULES: ${{ inputs.use_custom_external_modules }}
+      CUSTOM_EXTERNAL_MODULES: ${{ inputs.custom_external_modules || '' }}
+      USE_NTSYNC: ${{ inputs.use_ntsync }}
+      USE_NETWORKING: ${{ inputs.use_networking }}
     steps:
-      - name: 检出代码仓库
-        uses: actions/checkout@v6
-
-      - name: 下载矩阵构建产物
-        uses: actions/download-artifact@v8
-        with:
-          path: ./downloaded-artifacts
-
-      - name: 准备 Release 元数据
+      - name: 触发补发 Release 工作流
         shell: bash
         run: |
           set -euo pipefail
 
-          release_tag="full-feature-${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          release_title="AnyBase Kernel 全属性矩阵 ${{ inputs.kernelsu_variant }} #${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-
-          find ./downloaded-artifacts -type f \
-            \( -name '*AnyKernel3.zip' -o -name '*.img' \) \
-            ! -path '*-Rejects/*' \
-            | sort > release_assets.txt
-
-          asset_count="$(wc -l < release_assets.txt | tr -d '[:space:]')"
-          if [ "$asset_count" -eq 0 ]; then
-            echo "::error::未找到可发布的内核产物。"
-            find ./downloaded-artifacts -maxdepth 3 -type f -print || true
-            exit 1
+          if [ -n "$KPM_PASSWORD" ]; then
+            kpm_password_label="已自定义"
+          else
+            kpm_password_label="默认"
           fi
 
-          cat > release_body.md << EOF
-          ## AnyBase Kernel 全属性矩阵构建
+          if [ -n "$CUSTOM_EXTERNAL_MODULES" ]; then
+            custom_modules_label="$CUSTOM_EXTERNAL_MODULES"
+          else
+            custom_modules_label="无"
+          fi
 
-          全量矩阵已全部构建成功，本 Release 自动发布本次 workflow run 的所有内核产物。
+          release_metadata="$(
+            jq -cn \
+              --arg ksu_variant "$KSU_VARIANT" \
+              --arg ksu_branch "$KSU_BRANCH" \
+              --arg build_time "$BUILD_TIME" \
+              --arg susfs_enabled "true" \
+              --arg use_zram "true" \
+              --arg zram_full_algo "true" \
+              --arg zram_extra_algos "无" \
+              --arg use_bbg "true" \
+              --arg use_ddk "true" \
+              --arg use_kpm "true" \
+              --arg kpm_password "$kpm_password_label" \
+              --arg use_rekernel "true" \
+              --arg use_custom_external_modules "$USE_CUSTOM_EXTERNAL_MODULES" \
+              --arg custom_external_modules "$custom_modules_label" \
+              --arg use_ntsync "$USE_NTSYNC" \
+              --arg use_networking "$USE_NETWORKING" \
+              '{
+                ksu_variant: $ksu_variant,
+                ksu_branch: $ksu_branch,
+                build_time: $build_time,
+                susfs_enabled: $susfs_enabled,
+                use_zram: $use_zram,
+                zram_full_algo: $zram_full_algo,
+                zram_extra_algos: $zram_extra_algos,
+                use_bbg: $use_bbg,
+                use_ddk: $use_ddk,
+                use_kpm: $use_kpm,
+                kpm_password: $kpm_password,
+                use_rekernel: $use_rekernel,
+                use_custom_external_modules: $use_custom_external_modules,
+                custom_external_modules: $custom_external_modules,
+                use_ntsync: $use_ntsync,
+                use_networking: $use_networking
+              }'
+          )"
 
-          | 项目 | 内容 |
-          |:---|:---|
-          | KernelSU 变体 | ${{ inputs.kernelsu_variant }} |
-          | KernelSU 分支 | ${{ inputs.kernelsu_branch }} |
-          | 自定义版本名 | ${{ inputs.version || '未设置' }} |
-          | 构建时间 | ${{ inputs.build_time || '当前 UTC' }} |
-          | 矩阵任务数 | ${{ needs.prepare-matrix.outputs.count }} |
-          | BBG | 开启 |
-          | DDK LSM | 开启 |
-          | NTsync | ${{ inputs.use_ntsync && '开启' || '关闭' }} |
-          | Networking | ${{ inputs.use_networking && '开启' || '关闭' }} |
-          | KPM | 开启 |
-          | Re-Kernel | 开启 |
-          | SUSFS | 开启 |
-          | Droidspaces | off |
-          | 自定义外部模块 | ${{ inputs.use_custom_external_modules && 'on' || 'off' }} |
-          | Android16 / 6.12 ZRAM | off |
+          release_title="AnyBase Kernel 全属性矩阵 ${KSU_VARIANT} #${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
 
-          ### 下载说明
-
-          Assets 中包含每个内核小版本对应的 AnyKernel3 刷入包和 boot 镜像。
-
-          > 刷写内核有变砖风险。刷入前请备份原厂 boot / vendor_boot 等镜像，并确认设备、Android 版本、内核版本和补丁级别匹配。
-          EOF
-
-          {
-            echo "RELEASE_TAG=$release_tag"
-            echo "RELEASE_TITLE=$release_title"
-            echo "ASSET_COUNT=$asset_count"
-          } >> "$GITHUB_ENV"
-
-      - name: 创建 GitHub Release
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gh release create "$RELEASE_TAG" \
+          gh workflow run release-existing-full-feature-run.yml \
             --repo "$REPO" \
-            --target "$GITHUB_SHA" \
-            --title "$RELEASE_TITLE" \
-            --notes-file release_body.md
+            --ref "$GITHUB_REF_NAME" \
+            -f source_run_id="$GITHUB_RUN_ID" \
+            -f source_attempt="$GITHUB_RUN_ATTEMPT" \
+            -f kernelsu_variant="$KSU_VARIANT" \
+            -f release_title="$release_title" \
+            -f release_metadata_json="$release_metadata"
 
-      - name: 上传 Release 产物
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          while IFS= read -r file; do
-            [ -f "$file" ] || continue
-            echo "上传 $file"
-            gh release upload "$RELEASE_TAG" "$file" --repo "$REPO" --clobber
-          done < release_assets.txt
-
-      - name: 发布摘要
-        shell: bash
-        run: |
           {
-            echo "## 全属性矩阵 Release 已创建"
-            echo "- Release: https://github.com/$REPO/releases/tag/$RELEASE_TAG"
-            echo "- 产物数量: $ASSET_COUNT"
-            echo "- 矩阵任务数: ${{ needs.prepare-matrix.outputs.count }}"
+            echo "## 已触发补发 Release 工作流"
+            echo
+            echo "- 源 run: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- 补发工作流: release-existing-full-feature-run.yml"
+            echo "- Release 标题: ${release_title}"
+            echo "- 自定义注入: ${USE_CUSTOM_EXTERNAL_MODULES}"
+            echo "- 自定义注入参数列表: ${custom_modules_label}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "已触发补发 Release 工作流: ${release_title}"

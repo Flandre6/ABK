@@ -26,6 +26,11 @@ on:
         required: false
         type: string
         default: ""
+      release_metadata_json:
+        description: "Release 配置元数据 JSON（由全量矩阵工作流自动传入）"
+        required: false
+        type: string
+        default: "{}"
 
 jobs:
   release-existing-run:
@@ -36,6 +41,8 @@ jobs:
       REPO: ${{ github.repository }}
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       SOURCE_ATTEMPT: ${{ inputs.source_attempt || '1' }}
+      INPUT_RELEASE_TITLE: ${{ inputs.release_title || '' }}
+      RELEASE_METADATA_JSON: ${{ inputs.release_metadata_json || '{}' }}
     steps:
       - name: 检出代码仓库
         uses: actions/checkout@v6
@@ -89,11 +96,44 @@ jobs:
         run: |
           set -euo pipefail
 
+          metadata="${RELEASE_METADATA_JSON:-{}}"
+          if ! jq -e . >/dev/null 2>&1 <<< "$metadata"; then
+            echo "::warning::release_metadata_json 不是合法 JSON，使用默认元数据。"
+            metadata="{}"
+          fi
+
+          metadata_value() {
+            local key="$1"
+            local fallback="$2"
+            local value
+            value="$(jq -r --arg key "$key" '.[$key] // ""' <<< "$metadata")"
+            if [ -n "$value" ]; then
+              printf '%s' "$value"
+            else
+              printf '%s' "$fallback"
+            fi
+          }
+
+          ksu_variant="$(metadata_value ksu_variant "${{ inputs.kernelsu_variant }}")"
+          ksu_branch="$(metadata_value ksu_branch "Stable(标准)")"
+          build_time="$(metadata_value build_time "Sun Dec 01 08:10:00 UTC 2024")"
+          susfs_enabled="$(metadata_value susfs_enabled "true")"
+          use_zram="$(metadata_value use_zram "true")"
+          zram_full_algo="$(metadata_value zram_full_algo "true")"
+          zram_extra_algos="$(metadata_value zram_extra_algos "无")"
+          use_bbg="$(metadata_value use_bbg "true")"
+          use_ddk="$(metadata_value use_ddk "true")"
+          use_kpm="$(metadata_value use_kpm "true")"
+          kpm_password="$(metadata_value kpm_password "默认")"
+          use_rekernel="$(metadata_value use_rekernel "true")"
+          use_custom_external_modules="$(metadata_value use_custom_external_modules "false")"
+          custom_external_modules="$(metadata_value custom_external_modules "无")"
+
           release_tag="full-feature-${SOURCE_RUN_ID}-a${SOURCE_ATTEMPT}"
-          if [ -n "${{ inputs.release_title }}" ]; then
-            release_title="${{ inputs.release_title }}"
+          if [ -n "$INPUT_RELEASE_TITLE" ]; then
+            release_title="$INPUT_RELEASE_TITLE"
           else
-            release_title="AnyBase Kernel 全属性矩阵 ${{ inputs.kernelsu_variant }} #${SOURCE_RUN_ID}.${SOURCE_ATTEMPT}"
+            release_title="AnyBase Kernel 全属性矩阵 ${ksu_variant} #${SOURCE_RUN_ID}.${SOURCE_ATTEMPT}"
           fi
 
           find ./downloaded-artifacts -type f \
@@ -116,9 +156,23 @@ jobs:
           |:---|:---|
           | 源 run | https://github.com/$REPO/actions/runs/$SOURCE_RUN_ID |
           | 源 commit | $SOURCE_HEAD_SHA |
-          | KernelSU 变体 | ${{ inputs.kernelsu_variant }} |
+          | KernelSU 变体 | $ksu_variant |
           | Artifact 数 | $ARTIFACT_COUNT |
           | Release asset 数 | $asset_count |
+          | KSU 变体 | $ksu_variant |
+          | KSU 分支 | $ksu_branch |
+          | 构建时间 | $build_time |
+          | SUSFS 状态 | $susfs_enabled |
+          | ZRAM 增强 | $use_zram |
+          | ZRAM 完整算法 | $zram_full_algo |
+          | ZRAM 额外算法 | $zram_extra_algos |
+          | BBG 补丁 | $use_bbg |
+          | DDK LSM | $use_ddk |
+          | KPM 功能 | $use_kpm |
+          | KPM 密码 | $kpm_password |
+          | Re-Kernel | $use_rekernel |
+          | 自定义注入 | $use_custom_external_modules |
+          | 自定义注入参数列表 | $custom_external_modules |
 
           ### 下载说明
 
