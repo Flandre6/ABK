@@ -185,6 +185,38 @@ ensure_ddk_include() {
 #include <linux/xingguang_ddk.h>' "$file"
 }
 
+ensure_ddk_include_after_includes() {
+	file="$1"
+	include='#include <linux/xingguang_ddk.h>'
+
+	if [ ! -f "$file" ]; then
+		echo "[ERROR] DDK target file not found: $file"
+		return 1
+	fi
+
+	if grep -qF "$include" "$file"; then
+		return 0
+	fi
+
+	awk -v inc_line="$include" '
+		{ lines[NR] = $0 }
+		/^#include[[:space:]]+[<"]/ { last_include = NR }
+		END {
+			if (!last_include)
+				exit 1
+			for (i = 1; i <= NR; i++) {
+				print lines[i]
+				if (i == last_include)
+					print inc_line
+			}
+		}
+	' "$file" > "$file.xg-ddk.tmp" && mv "$file.xg-ddk.tmp" "$file" && return 0
+
+	rm -f "$file.xg-ddk.tmp"
+	echo "[ERROR] DDK include anchor not found in $file"
+	return 1
+}
+
 inject_blkdev_ioctl_compat() {
 	file="$1"
 
@@ -284,6 +316,80 @@ apply_ddk_0030_compat() {
 	function_has_call_name "$blk_lib_file" "blkdev_issue_zeroout" "xg_ddk_blkdev_issue_zeroout(bdev, sector, nr_sects)" || return 1
 }
 
+apply_ddk_0040_compat() {
+	dm_table_file="$COMMON_ROOT/drivers/md/dm-table.c"
+
+	ensure_ddk_include_after_includes "$dm_table_file" || return 1
+
+	if function_has_call_name "$dm_table_file" "dm_table_add_target" "xg_ddk_dm_target_add("; then
+		return 0
+	fi
+
+	python3 - "$dm_table_file" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+sig_re = re.compile(r"^\s*int\s+dm_table_add_target\s*\(")
+brace_line = None
+i = 0
+while i < len(lines):
+    if sig_re.search(lines[i]):
+        j = i
+        while j < len(lines):
+            if ";" in lines[j] and "{" not in lines[j]:
+                break
+            if "{" in lines[j]:
+                brace_line = j
+                break
+            j += 1
+        if brace_line is not None:
+            break
+        i = j
+    i += 1
+
+if brace_line is None:
+    raise SystemExit("dm_table_add_target anchor not found")
+
+depth = 0
+end_line = None
+for i in range(brace_line, len(lines)):
+    depth += lines[i].count("{") - lines[i].count("}")
+    if i > brace_line and depth == 0:
+        end_line = i + 1
+        break
+
+if end_line is None:
+    raise SystemExit("dm_table_add_target body end not found")
+
+body = "".join(lines[brace_line:end_line])
+if "xg_ddk_dm_target_add(" in body:
+    raise SystemExit(0)
+
+for i in range(brace_line, end_line):
+    line = lines[i]
+    if "t->highs[t->num_targets++]" not in line:
+        continue
+    match = re.search(r"([A-Za-z_]\w*)->begin\s*\+\s*\1->len\s*-\s*1", line)
+    if not match:
+        match = re.search(r"([A-Za-z_]\w*)->begin", line)
+    if not match:
+        continue
+    target_var = match.group(1)
+    lines.insert(i + 1, f"\n\txg_ddk_dm_target_add({target_var}->type->name);\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    raise SystemExit(0)
+
+raise SystemExit("dm_table_add_target highs anchor not found")
+PY
+
+	function_has_call_name "$dm_table_file" "dm_table_add_target" "xg_ddk_dm_target_add(" || return 1
+}
+
 echo "[+] Setting up Xingguang DDK LSM"
 
 if [ -d "$PATCH_DIR" ]; then
@@ -301,6 +407,8 @@ if [ -d "$PATCH_DIR" ]; then
 		elif git -C "$COMMON_ROOT" apply --reverse --check "$patch" >/dev/null 2>&1; then
 			echo " - already applied $name"
 		elif [ "$name" = "0030-block-ioctl-erase-callsite.patch" ] && apply_ddk_0030_compat; then
+			echo " - applied $name (compat)"
+		elif [ "$name" = "0040-dm-target-callsite.patch" ] && apply_ddk_0040_compat; then
 			echo " - applied $name (compat)"
 		elif [ "$optional" = true ]; then
 			echo " - skipped optional $name"
