@@ -163,6 +163,129 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 }
 
+apply_ddk_0010_compat() {
+	read_write_file="$COMMON_ROOT/fs/read_write.c"
+
+	ensure_ddk_include_after_includes "$read_write_file" || return 1
+
+	python3 - "$read_write_file" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+
+def find_function(name):
+    sig_re = re.compile(
+        r"^\s*(?:[A-Za-z_][\w\s\*]*\s+)+" + re.escape(name) + r"\s*\("
+    )
+    brace_line = None
+    i = 0
+    while i < len(lines):
+        if sig_re.search(lines[i]):
+            j = i
+            while j < len(lines):
+                if ";" in lines[j] and "{" not in lines[j]:
+                    break
+                if "{" in lines[j]:
+                    brace_line = j
+                    break
+                j += 1
+            if brace_line is not None:
+                break
+            i = j
+        i += 1
+
+    if brace_line is None:
+        return None
+
+    depth = 0
+    for i in range(brace_line, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if i > brace_line and depth == 0:
+            return brace_line, i + 1
+    return None
+
+
+def insert_after_rw_verify(name, marker, call):
+    found = find_function(name)
+    if not found:
+        return False
+    brace_line, end_line = found
+    body = "".join(lines[brace_line:end_line])
+    if marker in body:
+        return True
+
+    rw_line = None
+    for i in range(brace_line, end_line):
+        line = lines[i]
+        if "ret = rw_verify_area(WRITE, file," in line:
+            rw_line = i
+            break
+    if rw_line is None:
+        raise SystemExit(f"{name} rw_verify_area write anchor not found")
+
+    insert_at = rw_line + 1
+    while insert_at < end_line and lines[insert_at].strip() == "":
+        insert_at += 1
+    if insert_at < end_line and re.match(r"\s*if\s*\(\s*ret(?:\s*<\s*0)?\s*\)", lines[insert_at]):
+        check_line = insert_at
+        insert_at += 1
+        while insert_at < end_line and lines[insert_at].strip() == "":
+            insert_at += 1
+        if insert_at < end_line and re.match(r"\s*return\s+ret\s*;", lines[insert_at]):
+            insert_at += 1
+        else:
+            insert_at = check_line
+
+    lines[insert_at:insert_at] = [
+        f"\tret = {call};\n",
+        "\tif (ret)\n",
+        "\t\treturn ret;\n",
+        "\n",
+    ]
+    return True
+
+
+if not insert_after_rw_verify(
+    "vfs_write",
+    "xg_ddk_vfs_write(file, buf, count, pos)",
+    "xg_ddk_vfs_write(file, buf, count, pos)",
+):
+    raise SystemExit("vfs_write anchor not found")
+
+iter_hooked = False
+for name, call in (
+    ("do_iter_write", "xg_ddk_vfs_iter_write(file, iter, pos)"),
+    ("vfs_iter_write", "xg_ddk_vfs_iter_write(file, iter, ppos)"),
+):
+    if insert_after_rw_verify(name, call, call):
+        iter_hooked = True
+
+if not iter_hooked:
+    raise SystemExit("iter write anchor not found")
+
+if not insert_after_rw_verify(
+    "vfs_iocb_iter_write",
+    "xg_ddk_vfs_iter_write(file, iter, &iocb->ki_pos)",
+    "xg_ddk_vfs_iter_write(file, iter, &iocb->ki_pos)",
+):
+    raise SystemExit("vfs_iocb_iter_write anchor not found")
+
+with open(path, "w", encoding="utf-8") as f:
+    f.writelines(lines)
+PY
+
+	function_has_call_name "$read_write_file" "vfs_write" "xg_ddk_vfs_write(file, buf, count, pos)" || return 1
+	if ! function_has_call_name "$read_write_file" "do_iter_write" "xg_ddk_vfs_iter_write(file, iter, pos)" &&
+		! function_has_call_name "$read_write_file" "vfs_iter_write" "xg_ddk_vfs_iter_write(file, iter, ppos)"; then
+		return 1
+	fi
+	function_has_call_name "$read_write_file" "vfs_iocb_iter_write" "xg_ddk_vfs_iter_write(file, iter, &iocb->ki_pos)" || return 1
+}
+
 ensure_ddk_include() {
 	file="$1"
 	include='#include <linux/xingguang_ddk.h>'
@@ -497,22 +620,24 @@ if [ -d "$PATCH_DIR" ]; then
 	echo "[+] Applying Xingguang DDK patch stack"
 	for patch in "$PATCH_DIR"/*.patch; do
 		[ -e "$patch" ] || continue
-		name="$(basename "$patch")"
+		patch_name="$(basename "$patch")"
 		optional=false
-		case "$name" in
+		case "$patch_name" in
 			*.optional.patch) optional=true ;;
 		esac
 		if git -C "$COMMON_ROOT" apply --check "$patch" >/dev/null 2>&1; then
 			git -C "$COMMON_ROOT" apply "$patch"
-			echo " - applied $name"
+			echo " - applied $patch_name"
 		elif git -C "$COMMON_ROOT" apply --reverse --check "$patch" >/dev/null 2>&1; then
-			echo " - already applied $name"
-		elif [ "$name" = "0030-block-ioctl-erase-callsite.patch" ] && apply_ddk_0030_compat; then
-			echo " - applied $name (compat)"
-		elif [ "$name" = "0040-dm-target-callsite.patch" ] && apply_ddk_0040_compat; then
-			echo " - applied $name (compat)"
+			echo " - already applied $patch_name"
+		elif [ "$patch_name" = "0010-vfs-write-callsite.patch" ] && apply_ddk_0010_compat; then
+			echo " - applied $patch_name (compat)"
+		elif [ "$patch_name" = "0030-block-ioctl-erase-callsite.patch" ] && apply_ddk_0030_compat; then
+			echo " - applied $patch_name (compat)"
+		elif [ "$patch_name" = "0040-dm-target-callsite.patch" ] && apply_ddk_0040_compat; then
+			echo " - applied $patch_name (compat)"
 		elif [ "$optional" = true ]; then
-			echo " - skipped optional $name"
+			echo " - skipped optional $patch_name"
 		else
 			echo "[ERROR] failed to apply DDK patch: $patch"
 			git -C "$COMMON_ROOT" apply --check "$patch"
