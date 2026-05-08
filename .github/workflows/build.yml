@@ -1119,10 +1119,31 @@ jobs:
             fi
           fi
 
+      - name: 备份基准 defconfig
+        run: cp "$DEFCONFIG" "$DEFCONFIG.orig"
+
       - name: 应用 NTsync 补丁
         if: ${{ inputs.use_ntsync }}
         working-directory: ${{ env.KERNEL_ROOT }}/common
         run: |
+          set -euo pipefail
+
+          ensure_defconfig_value() {
+            local cfg="$1"
+            local value="$2"
+            local line="${cfg}=${value}"
+
+            if grep -qxF "$line" "$DEFCONFIG"; then
+              return 0
+            fi
+
+            if grep -Eq "^${cfg}=|^# ${cfg} is not set$" "$DEFCONFIG"; then
+              sed -i -E "s|^${cfg}=.*|${line}|; s|^# ${cfg} is not set$|${line}|" "$DEFCONFIG"
+            else
+              echo "$line" >> "$DEFCONFIG"
+            fi
+          }
+
           echo "启用 NTsync 补丁"
           echo "应用基础补丁: ntsync_base.patch..."
           patch -p1 --forward < $KERNEL_PATCHES/common/ntsync/ntsync_base.patch || true
@@ -1130,45 +1151,59 @@ jobs:
           PATCH_FILE="$KERNEL_PATCHES/common/ntsync/ntsync_compat_${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
           echo "应用版本补丁: ntsync_compat_${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
           patch -p1 --forward < "$PATCH_FILE" || true
-          cat >> "$DEFCONFIG" << 'EOF'
-          CONFIG_NTSYNC=y
-          EOF
+          ensure_defconfig_value CONFIG_NTSYNC y
           echo "应用 NTsync 补丁完成"
 
       - name: 应用 Networking 增强 (IPSet + BBR)
         if: ${{ inputs.use_networking }}
         working-directory: ${{ env.KERNEL_ROOT }}/common
         run: |
+          set -euo pipefail
+
+          ensure_defconfig_value() {
+            local cfg="$1"
+            local value="$2"
+            local line="${cfg}=${value}"
+
+            if grep -qxF "$line" "$DEFCONFIG"; then
+              return 0
+            fi
+
+            if grep -Eq "^${cfg}=|^# ${cfg} is not set$" "$DEFCONFIG"; then
+              sed -i -E "s|^${cfg}=.*|${line}|; s|^# ${cfg} is not set$|${line}|" "$DEFCONFIG"
+            else
+              echo "$line" >> "$DEFCONFIG"
+            fi
+          }
+
           echo " 添加IP SET & IPv6_NAT 支持"
-          cat >> "$DEFCONFIG" << 'EOF'
-          CONFIG_IP_SET=y
-          CONFIG_IP_SET_MAX=65534
-          CONFIG_IP_SET_BITMAP_IP=y
-          CONFIG_IP_SET_BITMAP_IPMAC=y
-          CONFIG_IP_SET_BITMAP_PORT=y
-          CONFIG_IP_SET_HASH_IP=y
-          CONFIG_IP_SET_HASH_IPMARK=y
-          CONFIG_IP_SET_HASH_IPPORT=y
-          CONFIG_IP_SET_HASH_IPPORTIP=y
-          CONFIG_IP_SET_HASH_IPPORTNET=y
-          CONFIG_IP_SET_HASH_IPMAC=y
-          CONFIG_IP_SET_HASH_MAC=y
-          CONFIG_IP_SET_HASH_NETPORTNET=y
-          CONFIG_IP_SET_HASH_NET=y
-          CONFIG_IP_SET_HASH_NETNET=y
-          CONFIG_IP_SET_HASH_NETPORT=y
-          CONFIG_IP_SET_HASH_NETIFACE=y
-          CONFIG_IP_SET_LIST_SET=y
-          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
-          CONFIG_NETFILTER_XT_SET=y
-          CONFIG_IP6_NF_NAT=y
-          CONFIG_IP6_NF_TARGET_MASQUERADE=y
-          EOF
+          ensure_defconfig_value CONFIG_IP_SET y
+          ensure_defconfig_value CONFIG_IP_SET_MAX 65534
+          ensure_defconfig_value CONFIG_IP_SET_BITMAP_IP y
+          ensure_defconfig_value CONFIG_IP_SET_BITMAP_IPMAC y
+          ensure_defconfig_value CONFIG_IP_SET_BITMAP_PORT y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_IP y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_IPMARK y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_IPPORT y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_IPPORTIP y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_IPPORTNET y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_IPMAC y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_MAC y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_NETPORTNET y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_NET y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_NETNET y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_NETPORT y
+          ensure_defconfig_value CONFIG_IP_SET_HASH_NETIFACE y
+          ensure_defconfig_value CONFIG_IP_SET_LIST_SET y
+          ensure_defconfig_value CONFIG_NETFILTER_XT_MATCH_ADDRTYPE y
+          ensure_defconfig_value CONFIG_NETFILTER_XT_SET y
+          ensure_defconfig_value CONFIG_IP6_NF_NAT y
+          ensure_defconfig_value CONFIG_IP6_NF_TARGET_MASQUERADE y
           if [ "${{ inputs.kernel_version }}" = "5.10" ]; then
             echo "应用 5.10 特殊配置 "
             sed -i 's/CONFIG_IP_SET_MAX/65534/g' net/netfilter/ipset/ip_set_core.c
           fi
-          
+
           echo " 添加 TCP Congestion Control (BBR) 支持"
           # 应用 BBRv3 补丁仅有6.1版本
           if [ "${{ inputs.kernel_version }}" = "6.1" ]; then
@@ -1177,19 +1212,17 @@ jobs:
             echo "→ 应用补丁: bbrv3-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
             patch -p1 --forward < "$PATCH_FILE" || true
           fi
-          
-          cat >> "$DEFCONFIG" << 'EOF'
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_TCP_CONG_CUBIC=y
-          CONFIG_TCP_CONG_BIC=y
-          CONFIG_TCP_CONG_WESTWOOD=y
-          CONFIG_TCP_CONG_HTCP=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_DEFAULT_TCP_CONG="bbr"
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_NET_SCH_FQ_CODEL=y
-          EOF
+
+          ensure_defconfig_value CONFIG_TCP_CONG_ADVANCED y
+          ensure_defconfig_value CONFIG_TCP_CONG_BBR y
+          ensure_defconfig_value CONFIG_TCP_CONG_CUBIC y
+          ensure_defconfig_value CONFIG_TCP_CONG_BIC y
+          ensure_defconfig_value CONFIG_TCP_CONG_WESTWOOD y
+          ensure_defconfig_value CONFIG_TCP_CONG_HTCP y
+          ensure_defconfig_value CONFIG_DEFAULT_BBR y
+          ensure_defconfig_value CONFIG_DEFAULT_TCP_CONG '"bbr"'
+          ensure_defconfig_value CONFIG_NET_SCH_FQ y
+          ensure_defconfig_value CONFIG_NET_SCH_FQ_CODEL y
 
           echo "✓ Networking配置完成"
 
@@ -1198,9 +1231,6 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/ravindu644/Droidspaces-OSS.git /tmp/Droidspaces-OSS
           echo "DROIDSPACES_PATCHES=/tmp/Droidspaces-OSS/Documentation/resources/kernel-patches/GKI" >> $GITHUB_ENV
-
-      - name: 备份基准 defconfig
-        run: cp "$DEFCONFIG" "$DEFCONFIG.orig"
 
       - name: 集成 Droidspaces 支持
         if: inputs.droidspaces != 'off'
