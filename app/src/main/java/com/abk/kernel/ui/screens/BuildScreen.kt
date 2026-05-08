@@ -86,6 +86,7 @@ fun BuildScreen(vm: MainViewModel) {
                     Text("补丁级别: ${config.osPatchLevel}")
                     Text("SUSFS: ${if (!config.cancelSusfs) "启用" else "禁用"} · ZRAM: ${if (config.useZram) "启用" else "禁用"} · KPM: ${if (config.useKpm) "启用" else "禁用"}")
                     Text("BBG: ${if (config.useBbg) "启用" else "禁用"} · DDK: ${if (config.useDdk) "启用" else "禁用"}")
+                    Text("NTsync: ${if (config.useNtsync) "启用" else "禁用"} · 网络增强: ${if (config.useNetworking) "启用" else "禁用"}")
                     Text("Droidspaces: ${droidspacesLabel(config.droidspaces)}")
                     Text(
                         "外部模块: ${
@@ -278,6 +279,12 @@ fun BuildScreen(vm: MainViewModel) {
                 }
                 SwitchRow("启用 DDK 防格机 LSM", config.useDdk) {
                     vm.updateBuildConfig(config.copy(useDdk = it))
+                }
+                SwitchRow("启用 NTsync 补丁", config.useNtsync) {
+                    vm.updateBuildConfig(config.copy(useNtsync = it))
+                }
+                SwitchRow("启用网络增强 (IPSet + BBR)", config.useNetworking) {
+                    vm.updateBuildConfig(config.copy(useNetworking = it))
                 }
                 SwitchRow("启用 KPM 功能", config.useKpm) {
                     vm.updateBuildConfig(config.copy(useKpm = it))
@@ -556,6 +563,20 @@ private fun BuildPlanHero(
                 ExpressiveStatusChip(
                     label = "Droidspaces ${droidspacesLabel(config.droidspaces)}",
                     icon = Icons.Default.Extension,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+            if (config.useNtsync) {
+                ExpressiveStatusChip(
+                    label = "NTsync",
+                    icon = Icons.Default.Sync,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+            if (config.useNetworking) {
+                ExpressiveStatusChip(
+                    label = "网络增强",
+                    icon = Icons.Default.Language,
                     color = MaterialTheme.colorScheme.secondary
                 )
             }
