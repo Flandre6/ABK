@@ -175,7 +175,7 @@ object KernelSupport {
             kernelVersion = line.kernelVersion,
             subLevel = subLevel,
             osPatchLevel = osPatch,
-            droidspaces = normalizeDroidspaces(line.kernelVersion, config.droidspaces),
+            virtualizationSupport = normalizeVirtualizationSupport(line.kernelVersion, config.virtualizationSupport),
             customExternalModules = config.customExternalModules.orEmpty()
                 .mapNotNull { module ->
                     val url = module.url.trim()
@@ -191,13 +191,13 @@ object KernelSupport {
         )
     }
 
-    fun droidspacesOptions(kernelVersion: String): List<String> =
+    fun virtualizationSupportOptions(kernelVersion: String): List<String> =
         if (kernelVersion == "6.12") listOf("off", "on") else listOf("off", "678", "123", "345")
 
-    private fun normalizeDroidspaces(kernelVersion: String, value: String): String {
+    private fun normalizeVirtualizationSupport(kernelVersion: String, value: String): String {
         val normalized = value.trim().lowercase()
         return when {
-            normalized in droidspacesOptions(kernelVersion) -> normalized
+            normalized in virtualizationSupportOptions(kernelVersion) -> normalized
             kernelVersion == "6.12" && normalized in setOf("678", "123", "345") -> "on"
             else -> "off"
         }

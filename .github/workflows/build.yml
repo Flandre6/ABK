@@ -78,7 +78,7 @@ on:
         required: false
         type: boolean
         default: false
-      droidspaces:
+      virtualization_support:
         required: false
         type: string
         default: "off"
@@ -144,7 +144,7 @@ jobs:
           echo "KPM 功能      : ${{ inputs.use_kpm }}"
           echo "KPM 密码      : ${{ inputs.kpm_password && '已自定义' || '默认' }}"
           echo "Re-Kernel     : ${{ inputs.use_rekernel }}"
-          echo "Droidspaces   : ${{ inputs.droidspaces }}"
+          echo "虚拟化支持   : ${{ inputs.virtualization_support }}"
           echo "自定义注入    : ${{ inputs.use_custom_external_modules }}"
           echo "Stock Config  : 自动检测 config/stock_defconfig"
           echo "========================================"
@@ -1226,22 +1226,22 @@ jobs:
 
           echo "✓ Networking配置完成"
 
-      - name: 克隆 Droidspaces 补丁仓库
-        if: inputs.droidspaces != 'off'
+      - name: 克隆虚拟化支持补丁仓库
+        if: inputs.virtualization_support != 'off'
         run: |
-          git clone --depth 1 https://github.com/ravindu644/Droidspaces-OSS.git /tmp/Droidspaces-OSS
-          echo "DROIDSPACES_PATCHES=/tmp/Droidspaces-OSS/Documentation/resources/kernel-patches/GKI" >> $GITHUB_ENV
+          git clone --depth 1 https://github.com/ravindu644/Droidspaces-OSS.git /tmp/virtualization-support-patches
+          echo "VIRTUALIZATION_SUPPORT_PATCHES=/tmp/virtualization-support-patches/Documentation/resources/kernel-patches/GKI" >> $GITHUB_ENV
 
-      - name: 集成 Droidspaces 支持
-        if: inputs.droidspaces != 'off'
+      - name: 集成虚拟化支持
+        if: inputs.virtualization_support != 'off'
         working-directory: ${{ env.KERNEL_ROOT }}/common
         run: |
           set -euo pipefail
           KERNEL_VER="${{ inputs.kernel_version }}"
-          SLOT="${{ inputs.droidspaces }}"
+          SLOT="${{ inputs.virtualization_support }}"
 
           fail() {
-            echo "::error::Droidspaces: $*"
+            echo "::error::虚拟化支持: $*"
             exit 1
           }
 
@@ -1251,11 +1251,11 @@ jobs:
             name="$(basename "$patch_file")"
             if git apply --check "$patch_file" >/dev/null 2>&1; then
               git apply "$patch_file"
-              echo "已应用 Droidspaces patch: $name"
+              echo "已应用虚拟化支持 patch: $name"
               return 0
             fi
             if git apply --reverse --check "$patch_file" >/dev/null 2>&1; then
-              echo "Droidspaces patch 已应用: $name"
+              echo "虚拟化支持 patch 已应用: $name"
               return 0
             fi
             return 1
@@ -1304,7 +1304,7 @@ jobs:
 
           case "$KERNEL_VER" in
             6.12)
-              PATCH_FILE="$DROIDSPACES_PATCHES/kernel-6.12/001.GKI-6.12-or-above-fix_sysvipc_kabi.patch"
+              PATCH_FILE="$VIRTUALIZATION_SUPPORT_PATCHES/kernel-6.12/001.GKI-6.12-or-above-fix_sysvipc_kabi.patch"
               if ! try_apply_patch "$PATCH_FILE"; then
                 apply_sysvipc_612_plus_compat
               fi
@@ -1315,7 +1315,7 @@ jobs:
                 *) fail "$KERNEL_VER 需要选择 678、123 或 345 槽位，当前为 $SLOT" ;;
               esac
               SLOT_NAME=$(echo "$SLOT" | sed 's/\(.\)/\1_/g; s/_$//')
-              PATCH_FILE="$DROIDSPACES_PATCHES/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_${SLOT_NAME}.patch"
+              PATCH_FILE="$VIRTUALIZATION_SUPPORT_PATCHES/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_${SLOT_NAME}.patch"
               if ! try_apply_patch "$PATCH_FILE"; then
                 if [ "$SLOT" = "678" ]; then
                   apply_sysvipc_below_612_compat
@@ -1331,8 +1331,8 @@ jobs:
 
           # 5.10 及以下还需要 POSIX_MQUEUE 的 kABI 修复
           if [ "$KERNEL_VER" = "5.10" ]; then
-            echo "应用 Droidspaces POSIX_MQUEUE kABI 修复补丁 (5.10)..."
-            POSIX_PATCH="$DROIDSPACES_PATCHES/below-kernel-6.12/002.5.10_or_lower_use_android_abi_padding_for_posix_mqueue.patch"
+            echo "应用虚拟化支持 POSIX_MQUEUE kABI 修复补丁 (5.10)..."
+            POSIX_PATCH="$VIRTUALIZATION_SUPPORT_PATCHES/below-kernel-6.12/002.5.10_or_lower_use_android_abi_padding_for_posix_mqueue.patch"
             if ! try_apply_patch "$POSIX_PATCH"; then
               apply_mqueue_510_compat
             fi
@@ -1353,7 +1353,7 @@ jobs:
             fi
           fi
 
-          echo "添加 Droidspaces 内核配置..."
+          echo "添加虚拟化支持内核配置..."
           # 按文档规则逐个处理: 已启用则跳过, "# not set" 则替换, 不存在则追加
           enable_config() {
             local cfg="$1"
@@ -1418,7 +1418,7 @@ jobs:
           enable_config_if_defined CONFIG_NETFILTER_XT_TARGET_REJECT
           enable_config_if_defined CONFIG_IP_NF_TARGET_REJECT
 
-          echo "Droidspaces 集成完成"
+          echo "虚拟化支持集成完成"
 
       - name: 应用 Unicode 绕过修复
         if: inputs.enable_susfs

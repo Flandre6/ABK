@@ -252,7 +252,7 @@ data class KernelBuildConfig(
     val zramFullAlgo: Boolean = false,
     val zramExtraAlgos: String = "",
     val kpmPassword: String = "",
-    val droidspaces: String = "off",
+    val virtualizationSupport: String = "off",
     val useCustomExternalModules: Boolean = false,
     val customExternalModules: List<CustomExternalModule> = emptyList()
 )

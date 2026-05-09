@@ -53,17 +53,17 @@ You can also run the workflows manually from GitHub Actions.
 
 ## Risk Notice
 
-## 🧪 Droidspaces Container Support (Experimental)
+## 🧪 Virtualization Support (Experimental)
 
 > **Experimental feature:** Successful build and boot is not guaranteed across all GKI versions. Always back up your boot image before flashing.
 >
-> **TIPS:** The workflow uses the [official Droidspaces patches](https://github.com/ravindu644/Droidspaces-OSS/tree/main/Documentation/resources/kernel-patches/GKI) from [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS). If you have better patches, feel free to open an issue. Since there are three patch variants, you may need to test them repeatedly to find one that fits your device. Choose based on other users' feedback or your own experience.
+> **TIPS:** The workflow uses upstream virtualization patches. If you have better patches, feel free to open an issue. Since there are three patch variants, you may need to test them repeatedly to find one that fits your device. Choose based on other users' feedback or your own experience.
 
-[Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) is a lightweight Linux containerization tool that lets you run full Linux environments (with systemd, OpenRC, etc.) on Android — useful for development, running servers, and more.
+Virtualization support enables the kernel features needed by Linux container environments, including IPC and PID namespaces, SysV IPC, and POSIX mqueue, so Android devices can run full Linux environments for development or services.
 
 **Supported versions:** 5.10 / 5.15 / 6.1 / 6.6 / 6.12
 
-**Usage:** When triggering a build manually, select the `Droidspaces` option:
+**Usage:** When triggering a build manually, select the `Virtualization Support` option:
 
 | Option | Description |
 |:---:|:---|
@@ -216,6 +216,7 @@ ABK continues development on top of the following projects, repositories, and co
 - GCC prebuilts: [LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-gnu-6.4.1](https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-gnu-6.4.1)
 - Baseband Guard: [vc-teahouse/Baseband-guard](https://github.com/vc-teahouse/Baseband-guard)
 - Re-Kernel: [Sakion-Team/Re-Kernel](https://github.com/Sakion-Team/Re-Kernel)
+- Droidspaces / virtualization patch source: [ravindu644/Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS)
 - KernelSU website: https://kernelsu.org/
 - NTsync，setip和BBR来源： [WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patche) PR by [huime180](https://github.com/huime180)
 

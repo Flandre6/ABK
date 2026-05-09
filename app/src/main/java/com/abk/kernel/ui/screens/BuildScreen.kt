@@ -50,8 +50,8 @@ fun BuildScreen(vm: MainViewModel) {
     val config = remember(rawConfig) { KernelSupport.normalize(rawConfig) }
     val recommended = state.recommendedBuildConfig
     val ksuBranchOptions = listOf("Stable(标准)", "Dev(开发)")
-    val droidspacesOptions = remember(config.kernelVersion) {
-        KernelSupport.droidspacesOptions(config.kernelVersion)
+    val virtualizationSupportOptions = remember(config.kernelVersion) {
+        KernelSupport.virtualizationSupportOptions(config.kernelVersion)
     }
     val subLevelOptions = remember(config.androidVersion, config.kernelVersion) {
         KernelSupport.subLevelOptions(config.androidVersion, config.kernelVersion)
@@ -87,7 +87,7 @@ fun BuildScreen(vm: MainViewModel) {
                     Text("SUSFS: ${if (!config.cancelSusfs) "启用" else "禁用"} · ZRAM: ${if (config.useZram) "启用" else "禁用"} · KPM: ${if (config.useKpm) "启用" else "禁用"}")
                     Text("BBG: ${if (config.useBbg) "启用" else "禁用"} · DDK: ${if (config.useDdk) "启用" else "禁用"}")
                     Text("NTsync: ${if (config.useNtsync) "启用" else "禁用"} · 网络增强: ${if (config.useNetworking) "启用" else "禁用"}")
-                    Text("Droidspaces: ${droidspacesLabel(config.droidspaces)}")
+                    Text("虚拟化支持: ${virtualizationSupportLabel(config.virtualizationSupport)}")
                     Text(
                         "外部模块: ${
                             if (config.useCustomExternalModules) "${config.customExternalModules.size} 个" else "未启用"
@@ -293,10 +293,10 @@ fun BuildScreen(vm: MainViewModel) {
                     vm.updateBuildConfig(config.copy(useRekernel = it))
                 }
                 DropdownField(
-                    label = "Droidspaces 容器支持",
-                    value = config.droidspaces,
-                    options = droidspacesOptions,
-                    onSelect = { vm.updateBuildConfig(config.copy(droidspaces = it)) }
+                    label = "虚拟化支持",
+                    value = config.virtualizationSupport,
+                    options = virtualizationSupportOptions,
+                    onSelect = { vm.updateBuildConfig(config.copy(virtualizationSupport = it)) }
                 )
                 SwitchRow("启用一加 8E 支持", config.suppOp) {
                     vm.updateBuildConfig(config.copy(suppOp = it))
@@ -559,9 +559,9 @@ private fun BuildPlanHero(
                 icon = Icons.Default.Extension,
                 color = if (!config.cancelSusfs) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline
             )
-            if (config.droidspaces != "off") {
+            if (config.virtualizationSupport != "off") {
                 ExpressiveStatusChip(
-                    label = "Droidspaces ${droidspacesLabel(config.droidspaces)}",
+                    label = "虚拟化支持 ${virtualizationSupportLabel(config.virtualizationSupport)}",
                     icon = Icons.Default.Extension,
                     color = MaterialTheme.colorScheme.secondary
                 )
@@ -589,7 +589,7 @@ private fun BuildPlanHero(
     )
 }
 
-private fun droidspacesLabel(value: String): String = when (value) {
+private fun virtualizationSupportLabel(value: String): String = when (value) {
     "off" -> "关闭"
     "on" -> "开启"
     "678" -> "槽位 6/7/8"

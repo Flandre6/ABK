@@ -283,6 +283,7 @@ private fun aboutLinks(): List<AboutLink> {
         ),
         AboutLink("Baseband Guard", "https://github.com/vc-teahouse/Baseband-guard"),
         AboutLink("Re-Kernel", "https://github.com/Sakion-Team/Re-Kernel"),
+        AboutLink("Droidspaces / 虚拟化支持补丁来源", "https://github.com/ravindu644/Droidspaces-OSS"),
         AboutLink("KernelSU 官方站点", "https://kernelsu.org/")
     )
 }

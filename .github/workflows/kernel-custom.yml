@@ -78,9 +78,9 @@ on:
         type: string
         default: "Sun Dec 01 08:10:00 UTC 2024"
 
-      # ==================== Droidspaces 配置 ====================
-      droidspaces:
-        description: "Droidspaces 容器支持 (5.10~6.6: 槽位补丁, 6.12: 开/关)"
+      # ==================== 虚拟化支持配置 ====================
+      virtualization_support:
+        description: "虚拟化支持 (5.10~6.6: 槽位补丁, 6.12: 开/关)"
         required: false
         type: choice
         options:
@@ -193,7 +193,7 @@ jobs:
       use_rekernel: ${{ inputs.use_rekernel || false }}
       supp_op: ${{ inputs.supp_op || false }}
       enable_susfs: ${{ !inputs.cancel_susfs }}
-      droidspaces: ${{ inputs.droidspaces || 'off' }}
+      virtualization_support: ${{ inputs.virtualization_support || 'off' }}
       zram_full_algo: ${{ inputs.zram_full_algo || false }}
       zram_extra_algos: ${{ inputs.zram_extra_algos || '' }}
       kpm_password: ${{ inputs.kpm_password || '' }}

@@ -145,7 +145,7 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write("## 全属性内核构建矩阵\n\n")
               summary.write(f"- 总任务数: {len(matrix)}\n")
-              summary.write("- Droidspaces: off\n")
+              summary.write("- 虚拟化支持: off\n")
               summary.write("- NTsync: ${{ inputs.use_ntsync && 'on' || 'off' }}\n")
               summary.write("- Networking: ${{ inputs.use_networking && 'on' || 'off' }}\n")
               summary.write("- 自定义外部模块: ${{ inputs.use_custom_external_modules && 'on' || 'off' }}\n")
@@ -185,7 +185,7 @@ jobs:
       use_rekernel: true
       enable_susfs: true
       supp_op: true
-      droidspaces: "off"
+      virtualization_support: "off"
       zram_full_algo: ${{ matrix.kernel_version != '6.12' }}
       zram_extra_algos: ""
       kpm_password: ${{ inputs.kpm_password || '' }}

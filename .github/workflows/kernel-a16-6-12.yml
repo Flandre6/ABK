@@ -35,8 +35,8 @@ on:
         required: false
         type: string
         default: "Sun Dec 01 08:10:00 UTC 2024"
-      droidspaces:
-        description: "Droidspaces 容器支持"
+      virtualization_support:
+        description: "虚拟化支持"
         required: false
         type: choice
         options:
@@ -148,7 +148,7 @@ on:
       supp_op:
         required: false
         type: boolean
-      droidspaces:
+      virtualization_support:
         required: false
         type: string
         default: "off"
@@ -207,7 +207,7 @@ jobs:
       use_rekernel: ${{ inputs.use_rekernel || false }}
       supp_op: ${{ inputs.supp_op || false }}
       enable_susfs: ${{ !inputs.cancel_susfs }}
-      droidspaces: ${{ inputs.droidspaces || 'off' }}
+      virtualization_support: ${{ inputs.virtualization_support || 'off' }}
       zram_full_algo: ${{ inputs.zram_full_algo || false }}
       zram_extra_algos: ${{ inputs.zram_extra_algos || '' }}
       kpm_password: ${{ inputs.kpm_password || '' }}
