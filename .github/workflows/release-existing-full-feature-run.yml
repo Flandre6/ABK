@@ -63,7 +63,13 @@ jobs:
 
           gh api "repos/$REPO/actions/runs/$SOURCE_RUN_ID/artifacts" --paginate \
             --jq '.artifacts[] | select(.expired == false and (.name | endswith("-Rejects") | not)) | .name' \
-            | sort > artifact_names.txt
+            | sort > artifact_names.raw.txt
+
+          sort -u artifact_names.raw.txt > artifact_names.txt
+          skipped_duplicate_count="$(comm -23 artifact_names.raw.txt artifact_names.txt | wc -l | tr -d '[:space:]')"
+          if [ "$skipped_duplicate_count" -gt 0 ]; then
+            echo "跳过 $skipped_duplicate_count 个重复 artifact 名称，公共辅助模块只下载一次。"
+          fi
 
           artifact_count="$(wc -l < artifact_names.txt | tr -d '[:space:]')"
           if [ "$artifact_count" -eq 0 ]; then
