@@ -6,18 +6,18 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -26,8 +26,10 @@ import coil.compose.AsyncImage
 import com.abk.kernel.BuildConfig
 import com.abk.kernel.R
 import com.abk.kernel.ui.components.ExpressiveHeroCard
+import com.abk.kernel.ui.components.ExpressiveListItem
 import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
+import com.abk.kernel.ui.components.ExpressiveSwitchItem
 import com.abk.kernel.ui.components.ExpressiveTopBar
 import com.abk.kernel.viewmodel.MainViewModel
 
@@ -112,14 +114,15 @@ fun SettingsScreen(vm: MainViewModel) {
             // ── 账户 ──────────────────────────────────────────────────────
             SettingsGroup(title = stringResource(R.string.settings_account)) {
                 state.user?.let { user ->
-                    ListItem(
-                        headlineContent = { Text(user.login, fontWeight = FontWeight.SemiBold) },
-                        supportingContent = { Text(user.name ?: user.htmlUrl) },
+                    ExpressiveListItem(
+                        title = user.login,
+                        subtitle = user.name ?: user.htmlUrl,
                         leadingContent = {
                             AsyncImage(
                                 model = user.avatarUrl,
                                 contentDescription = null,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(42.dp)
+                                    .clip(CircleShape)
                             )
                         },
                         trailingContent = {
@@ -128,15 +131,14 @@ fun SettingsScreen(vm: MainViewModel) {
                             }
                         }
                     )
-                    HorizontalDivider()
-                    ListItem(
-                        headlineContent = { Text("Fork 仓库") },
-                        supportingContent = { Text(state.forkRepo?.fullName ?: "未 Fork") },
-                        leadingContent = { Icon(Icons.Default.ForkRight, null) }
+                    ExpressiveListItem(
+                        title = "Fork 仓库",
+                        subtitle = state.forkRepo?.fullName ?: "未 Fork",
+                        leadingIcon = Icons.Default.ForkRight
                     )
-                } ?: ListItem(
-                    headlineContent = { Text("未登录") },
-                    leadingContent = { Icon(Icons.Default.AccountCircle, null) }
+                } ?: ExpressiveListItem(
+                    title = "未登录",
+                    leadingIcon = Icons.Default.AccountCircle
                 )
             }
 
@@ -149,7 +151,6 @@ fun SettingsScreen(vm: MainViewModel) {
                     checked = state.autoDownload,
                     onCheckedChange = { vm.setAutoDownload(it) }
                 )
-                HorizontalDivider()
                 SwitchSettingsItem(
                     icon = Icons.Default.CloudDownload,
                     title = "预编译 GKI 获取与下载",
@@ -177,32 +178,28 @@ fun SettingsScreen(vm: MainViewModel) {
 
             // ── 主题 ──────────────────────────────────────────────────────
             SettingsGroup(title = stringResource(R.string.settings_theme)) {
-                ListItem(
-                    headlineContent = { Text("颜色与外观") },
-                    supportingContent = {
-                        Text("${themeModeLabel(state.themeMode)} · ${dynamicColorLabel(state.dynamicColorEnabled)}")
-                    },
-                    leadingContent = { Icon(Icons.Default.Palette, null) },
+                ExpressiveListItem(
+                    title = "颜色与外观",
+                    subtitle = "${themeModeLabel(state.themeMode)} · ${dynamicColorLabel(state.dynamicColorEnabled)}",
+                    leadingIcon = Icons.Default.Palette,
                     trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { showThemeSettings = true }
+                    onClick = { showThemeSettings = true }
                 )
             }
 
             // ── 关于 ──────────────────────────────────────────────────────
             SettingsGroup(title = stringResource(R.string.settings_about)) {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.app_full_name)) },
-                    supportingContent = { Text("AnyBase Kernel v${BuildConfig.VERSION_NAME}") },
-                    leadingContent = { Icon(Icons.Default.Info, null) }
+                ExpressiveListItem(
+                    title = stringResource(R.string.app_full_name),
+                    subtitle = "AnyBase Kernel v${BuildConfig.VERSION_NAME}",
+                    leadingIcon = Icons.Default.Info
                 )
-                HorizontalDivider()
-                ListItem(
-                    headlineContent = { Text("关于") },
-                    supportingContent = { Text("项目入口、源码仓库、上游项目与致谢") },
-                    leadingContent = { Icon(Icons.Default.AutoAwesome, null) },
+                ExpressiveListItem(
+                    title = "关于",
+                    subtitle = "项目入口、源码仓库、上游项目与致谢",
+                    leadingIcon = Icons.Default.AutoAwesome,
                     trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-                    modifier = Modifier.clickable { showAboutDialog = true }
+                    onClick = { showAboutDialog = true }
                 )
             }
 
@@ -235,25 +232,19 @@ private fun ThemeSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         SettingsGroup(title = "外观模式") {
-            ButtonGroup(
-                overflowIndicator = { menuState ->
-                    ButtonGroupDefaults.OverflowIndicator(menuState)
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                themes.forEach { (key, label, icon) ->
-                    toggleableItem(
-                        checked = themeMode == key,
-                        label = label,
-                        onCheckedChange = { selected ->
-                            if (selected) onThemeModeChange(key)
-                        },
-                        icon = {
-                            Icon(icon, contentDescription = null)
-                        },
-                        weight = 1f
-                    )
-                }
+            themes.forEach { (key, label, icon) ->
+                val selected = themeMode == key
+                ExpressiveListItem(
+                    title = label,
+                    leadingIcon = icon,
+                    selected = selected,
+                    trailingContent = {
+                        if (selected) {
+                            Icon(Icons.Default.Check, null)
+                        }
+                    },
+                    onClick = { onThemeModeChange(key) }
+                )
             }
         }
 
@@ -351,13 +342,12 @@ private fun AboutLinkRow(
     link: AboutLink,
     onOpenUrl: (String) -> Unit
 ) {
-    ListItem(
-        headlineContent = { Text(link.title, fontWeight = FontWeight.SemiBold) },
-        supportingContent = { Text(link.url) },
-        leadingContent = { Icon(Icons.Default.Code, null) },
+    ExpressiveListItem(
+        title = link.title,
+        subtitle = link.url,
+        leadingIcon = Icons.Default.Code,
         trailingContent = { Icon(Icons.Default.OpenInBrowser, null) },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.clickable { onOpenUrl(link.url) }
+        onClick = { onOpenUrl(link.url) }
     )
 }
 
@@ -457,7 +447,7 @@ private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> 
             else -> Icons.Default.Info
         }
     ) {
-        Column { content() }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
     }
 }
 
@@ -470,41 +460,13 @@ private fun SwitchSettingsItem(
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    ListItem(
-        leadingContent = {
-            Icon(
-                icon,
-                null,
-                tint = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    checked -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-        },
-        headlineContent = {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            )
-        },
-        supportingContent = {
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            )
-        },
-        trailingContent = {
-            Switch(
-                checked = checked,
-                enabled = enabled,
-                onCheckedChange = onCheckedChange
-            )
-        },
-        modifier = Modifier.fillMaxWidth()
+    ExpressiveSwitchItem(
+        title = title,
+        subtitle = subtitle,
+        icon = icon,
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = onCheckedChange
     )
 }
 
@@ -517,25 +479,18 @@ private fun MirrorSettingsItem(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        ListItem(
-            leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
-            headlineContent = {
-                Text("下载镜像站", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            },
-            supportingContent = {
-                Text(
-                    "留空直连 GitHub；填写后会先镜像到 Release 再下载",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+        ExpressiveListItem(
+            title = "下载镜像站",
+            subtitle = "留空直连 GitHub；填写后会先镜像到 Release 再下载",
+            leadingIcon = Icons.Default.Public
         )
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
             placeholder = { Text("https://hk.gh-proxy.org/") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp)
         )
     }
 }

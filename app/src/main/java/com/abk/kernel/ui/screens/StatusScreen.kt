@@ -6,6 +6,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -169,7 +170,6 @@ fun StatusScreen(vm: MainViewModel) {
                 StatusRow(Icons.Default.Memory, "内核: $kernelVersion", false)
                 StatusRow(Icons.Default.Shield, "KSU: $ksuVersion", ksuVersion == "N/A")
                 state.user?.let { user ->
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AsyncImage(
                             model = user.avatarUrl,
@@ -202,9 +202,6 @@ fun StatusScreen(vm: MainViewModel) {
                         val visibleRuns = state.recentRuns.take(5)
                         visibleRuns.forEachIndexed { index, run ->
                             RunListItem(run)
-                            if (index != visibleRuns.lastIndex) {
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            }
                         }
                     }
                 }
@@ -271,7 +268,10 @@ private fun StatusMetricCard(
         label = "metric-color"
     )
     Card(
-        modifier = modifier
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Icon(icon, null, tint = animatedColor, modifier = Modifier.size(26.dp))

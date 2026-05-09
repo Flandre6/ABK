@@ -12,6 +12,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -33,8 +34,10 @@ import com.abk.kernel.data.model.CustomExternalModuleStage
 import com.abk.kernel.data.model.KernelSupport
 import com.abk.kernel.data.model.KernelBuildConfig
 import com.abk.kernel.ui.components.ExpressiveHeroCard
+import com.abk.kernel.ui.components.ExpressiveListItem
 import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
+import com.abk.kernel.ui.components.ExpressiveSwitchItem
 import com.abk.kernel.ui.components.ExpressiveTopBar
 import com.abk.kernel.viewmodel.MainViewModel
 import java.time.ZoneOffset
@@ -249,7 +252,8 @@ fun BuildScreen(vm: MainViewModel) {
                         },
                         placeholder = { Text("如: r11") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        shape = RoundedCornerShape(22.dp)
                     )
                 }
             }
@@ -320,7 +324,8 @@ fun BuildScreen(vm: MainViewModel) {
                             label = { Text("自定义 ZRAM 算法") },
                             placeholder = { Text("如: lzo,lz4,deflate,zstd") },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            shape = RoundedCornerShape(22.dp)
                         )
                     }
                 }
@@ -335,7 +340,8 @@ fun BuildScreen(vm: MainViewModel) {
                         label = { Text("KPM 超级密码 (可选)") },
                         placeholder = { Text("留空使用默认密码") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        shape = RoundedCornerShape(22.dp)
                     )
                 }
             }
@@ -353,7 +359,8 @@ fun BuildScreen(vm: MainViewModel) {
                             label = { Text("仓库链接") },
                             placeholder = { Text("https://github.com/user/module") },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            shape = RoundedCornerShape(22.dp)
                         )
                         DropdownField(
                             label = "注入阶段",
@@ -385,17 +392,10 @@ fun BuildScreen(vm: MainViewModel) {
                         }
 
                         config.customExternalModules.forEachIndexed { index, module ->
-                            ListItem(
-                                headlineContent = {
-                                    Text(CustomExternalModuleStage.normalize(module.stage))
-                                },
-                                supportingContent = {
-                                    Text(
-                                        module.url,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
+                            ExpressiveListItem(
+                                title = CustomExternalModuleStage.normalize(module.stage),
+                                subtitle = module.url,
+                                leadingIcon = Icons.Default.Extension,
                                 trailingContent = {
                                     IconButton(
                                         onClick = {
@@ -423,7 +423,8 @@ fun BuildScreen(vm: MainViewModel) {
                     onValueChange = { vm.updateBuildConfig(config.copy(version = it)) },
                     label = { Text("自定义版本名 (可选)") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    shape = RoundedCornerShape(22.dp)
                 )
                 ConfigPreviewText(versionPreview)
                 OutlinedTextField(
@@ -432,7 +433,8 @@ fun BuildScreen(vm: MainViewModel) {
                     label = { Text("自定义构建时间 (可选)") },
                     placeholder = { Text("留空/N=当前 UTC 时间") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    shape = RoundedCornerShape(22.dp)
                 )
                 ConfigPreviewText(buildTimePreview)
             }
@@ -477,18 +479,10 @@ fun BuildScreen(vm: MainViewModel) {
 
 @Composable
 private fun ConfigPreviewText(preview: String) {
-    ListItem(
-        leadingContent = {
-            Icon(Icons.Default.Visibility, contentDescription = null)
-        },
-        headlineContent = {
-            Text(
-                preview,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
+    ExpressiveListItem(
+        title = "配置预览",
+        subtitle = preview,
+        leadingIcon = Icons.Default.Visibility,
         modifier = Modifier.fillMaxWidth()
     )
 }
@@ -733,17 +727,10 @@ private fun buildStatusLabel(status: BuildStatus): String = when (status) {
 
 @Composable
 fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    ListItem(
-        headlineContent = {
-            Text(
-                label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
-            )
-        },
-        trailingContent = {
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
-        }
+    ExpressiveSwitchItem(
+        title = label,
+        checked = checked,
+        onCheckedChange = onCheckedChange
     )
 }
 
@@ -766,7 +753,8 @@ fun DropdownField(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(),
+            shape = RoundedCornerShape(22.dp)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { opt ->
