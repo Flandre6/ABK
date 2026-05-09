@@ -128,6 +128,7 @@ jobs:
           use_rekernel="$(metadata_value use_rekernel "true")"
           use_custom_external_modules="$(metadata_value use_custom_external_modules "false")"
           custom_external_modules="$(metadata_value custom_external_modules "无")"
+          virtualization_support="$(metadata_value virtualization_support "off")"
 
           release_tag="full-feature-${SOURCE_RUN_ID}-a${SOURCE_ATTEMPT}"
           if [ -n "$INPUT_RELEASE_TITLE" ]; then
@@ -171,6 +172,7 @@ jobs:
           | KPM 功能 | $use_kpm |
           | KPM 密码 | $kpm_password |
           | Re-Kernel | $use_rekernel |
+          | 虚拟化支持 | $virtualization_support |
           | 自定义注入 | $use_custom_external_modules |
           | 自定义注入参数列表 | $custom_external_modules |
 

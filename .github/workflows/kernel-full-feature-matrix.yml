@@ -49,6 +49,17 @@ on:
         required: false
         type: boolean
         default: true
+      virtualization_support:
+        description: "虚拟化支持 (5.10~6.6: 槽位补丁, 6.12: 开/关；on 在 5.10~6.6 自动使用 678)"
+        required: false
+        type: choice
+        options:
+          - "off"
+          - "on"
+          - "678"
+          - "123"
+          - "345"
+        default: "off"
       use_custom_external_modules:
         description: "启用自定义外部模块注入"
         required: false
@@ -145,7 +156,7 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write("## 全属性内核构建矩阵\n\n")
               summary.write(f"- 总任务数: {len(matrix)}\n")
-              summary.write("- 虚拟化支持: off\n")
+              summary.write("- 虚拟化支持: ${{ inputs.virtualization_support }}\n")
               summary.write("- NTsync: ${{ inputs.use_ntsync && 'on' || 'off' }}\n")
               summary.write("- Networking: ${{ inputs.use_networking && 'on' || 'off' }}\n")
               summary.write("- 自定义外部模块: ${{ inputs.use_custom_external_modules && 'on' || 'off' }}\n")
@@ -185,7 +196,7 @@ jobs:
       use_rekernel: true
       enable_susfs: true
       supp_op: true
-      virtualization_support: "off"
+      virtualization_support: ${{ inputs.virtualization_support == 'off' && 'off' || (matrix.kernel_version == '6.12' && 'on' || (inputs.virtualization_support == 'on' && '678' || inputs.virtualization_support)) }}
       zram_full_algo: ${{ matrix.kernel_version != '6.12' }}
       zram_extra_algos: ""
       kpm_password: ${{ inputs.kpm_password || '' }}
@@ -213,6 +224,7 @@ jobs:
       CUSTOM_EXTERNAL_MODULES: ${{ inputs.custom_external_modules || '' }}
       USE_NTSYNC: ${{ inputs.use_ntsync }}
       USE_NETWORKING: ${{ inputs.use_networking }}
+      VIRTUALIZATION_SUPPORT: ${{ inputs.virtualization_support }}
     steps:
       - name: 触发补发 Release 工作流
         shell: bash
@@ -249,6 +261,7 @@ jobs:
               --arg custom_external_modules "$custom_modules_label" \
               --arg use_ntsync "$USE_NTSYNC" \
               --arg use_networking "$USE_NETWORKING" \
+              --arg virtualization_support "$VIRTUALIZATION_SUPPORT" \
               '{
                 ksu_variant: $ksu_variant,
                 ksu_branch: $ksu_branch,
@@ -265,7 +278,8 @@ jobs:
                 use_custom_external_modules: $use_custom_external_modules,
                 custom_external_modules: $custom_external_modules,
                 use_ntsync: $use_ntsync,
-                use_networking: $use_networking
+                use_networking: $use_networking,
+                virtualization_support: $virtualization_support
               }'
           )"
 
@@ -286,6 +300,7 @@ jobs:
             echo "- 源 run: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}"
             echo "- 补发工作流: release-existing-full-feature-run.yml"
             echo "- Release 标题: ${release_title}"
+            echo "- 虚拟化支持: ${VIRTUALIZATION_SUPPORT}"
             echo "- 自定义注入: ${USE_CUSTOM_EXTERNAL_MODULES}"
             echo "- 自定义注入参数列表: ${custom_modules_label}"
           } >> "$GITHUB_STEP_SUMMARY"
