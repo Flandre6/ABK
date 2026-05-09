@@ -259,6 +259,7 @@ private fun AbkMainScaffold(vm: MainViewModel) {
                     NavigationBarItem(
                         selected = activeTab == tab,
                         onClick = { selectedTab = tab },
+                        alwaysShowLabel = false,
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                             selectedTextColor = MaterialTheme.colorScheme.onSurface,
