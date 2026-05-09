@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -92,6 +93,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -1408,6 +1410,15 @@ private fun FlashTerminalDialog(
     onReboot: () -> Unit
 ) {
     val terminalScroll = rememberScrollState()
+    val colorScheme = MaterialTheme.colorScheme
+    val isLightTheme = colorScheme.surface.luminance() > 0.5f
+    val terminalContainer = if (isLightTheme) {
+        colorScheme.surfaceContainerHighest
+    } else {
+        colorScheme.surfaceContainerLowest
+    }
+    val terminalTextColor = colorScheme.onSurface
+    val terminalCommandColor = colorScheme.primary
     AlertDialog(
         onDismissRequest = { if (!running) onClose() },
         icon = {
@@ -1422,7 +1433,10 @@ private fun FlashTerminalDialog(
         text = {
             Surface(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 190.dp, max = 360.dp),
-                color = MaterialTheme.colorScheme.inverseSurface
+                shape = MaterialTheme.shapes.large,
+                color = terminalContainer,
+                contentColor = terminalTextColor,
+                border = BorderStroke(1.dp, colorScheme.outlineVariant)
             ) {
                 Column(
                     modifier = Modifier
@@ -1437,9 +1451,9 @@ private fun FlashTerminalDialog(
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
                             color = if (line.startsWith("${'$'}")) {
-                                MaterialTheme.colorScheme.inversePrimary
+                                terminalCommandColor
                             } else {
-                                MaterialTheme.colorScheme.inverseOnSurface
+                                terminalTextColor
                             }
                         )
                     }
