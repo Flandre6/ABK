@@ -62,9 +62,10 @@ data class MainUiState(
     // Download
     val downloadedArtifacts: List<DownloadedArtifact> = emptyList(),
     val artifacts: List<BuildArtifact> = emptyList(),
-    val prebuiltGkiAssets: List<PrebuiltGkiAsset> = emptyList(),
-    val isLoadingPrebuiltGki: Boolean = false,
-    val recommendedPrebuiltGkiAssetIds: Set<Long> = emptySet(),
+    val prebuiltGkiReleases: List<PrebuiltGkiRelease> = emptyList(),
+    val isLoadingPrebuiltGkiReleases: Boolean = false,
+    val prebuiltGkiAssetsByReleaseId: Map<Long, List<PrebuiltGkiAsset>> = emptyMap(),
+    val loadingPrebuiltGkiAssetReleaseIds: Set<Long> = emptySet(),
     val isDownloading: Boolean = false,
     val downloadProgress: Map<Long, Int> = emptyMap(),
     val pendingAutoDownloadRunId: Long = -1L,
@@ -199,9 +200,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         it.copy(
                             prebuiltGkiEnabled = false,
-                            prebuiltGkiAssets = emptyList(),
-                            isLoadingPrebuiltGki = false,
-                            recommendedPrebuiltGkiAssetIds = emptySet()
+                            prebuiltGkiReleases = emptyList(),
+                            isLoadingPrebuiltGkiReleases = false,
+                            prebuiltGkiAssetsByReleaseId = emptyMap(),
+                            loadingPrebuiltGkiAssetReleaseIds = emptySet()
                         )
                     }
                 }
@@ -267,8 +269,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     rootGranted = granted,
                     recommendedBuildConfig = recommended,
-                    buildConfig = initialConfig ?: it.buildConfig,
-                    recommendedPrebuiltGkiAssetIds = recommendedPrebuiltAssetIds(it.prebuiltGkiAssets, recommended)
+                    buildConfig = initialConfig ?: it.buildConfig
                 )
             }
             if (shouldAdvance) advanceStep()
@@ -287,8 +288,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rootGranted = granted,
                     isLoading = false,
                     recommendedBuildConfig = recommended,
-                    buildConfig = initialConfig ?: it.buildConfig,
-                    recommendedPrebuiltGkiAssetIds = recommendedPrebuiltAssetIds(it.prebuiltGkiAssets, recommended)
+                    buildConfig = initialConfig ?: it.buildConfig
                 )
             }
             if (shouldAdvance) advanceStep()
@@ -411,9 +411,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     notifyBuild = it.notifyBuild,
                     themeMode = it.themeMode,
                     downloadMirrorBaseUrl = it.downloadMirrorBaseUrl,
-                    prebuiltGkiEnabled = it.prebuiltGkiEnabled,
-                    prebuiltGkiAssets = it.prebuiltGkiAssets,
-                    recommendedPrebuiltGkiAssetIds = it.recommendedPrebuiltGkiAssetIds
+                    prebuiltGkiEnabled = it.prebuiltGkiEnabled
                 )
             }
         }
@@ -769,31 +767,91 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startArtifactDownload(artifact)
     }
 
-    fun loadPrebuiltGki(force: Boolean = false) {
+    fun loadPrebuiltGkiReleases(force: Boolean = false) {
         val state = _uiState.value
         if (!state.prebuiltGkiEnabled || !state.isLoggedIn) return
-        if (!force && (state.isLoadingPrebuiltGki || state.prebuiltGkiAssets.isNotEmpty())) return
+        if (state.isLoadingPrebuiltGkiReleases || (!force && state.prebuiltGkiReleases.isNotEmpty())) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingPrebuiltGki = true, error = null) }
-            when (val result = github.listReleases(BuildConfig.SOURCE_REPO_OWNER, BuildConfig.SOURCE_REPO_NAME)) {
+            _uiState.update { it.copy(isLoadingPrebuiltGkiReleases = true, error = null) }
+            val result = github.listReleases(BuildConfig.SOURCE_REPO_OWNER, BuildConfig.SOURCE_REPO_NAME)
+            if (!_uiState.value.prebuiltGkiEnabled) {
+                _uiState.update { it.copy(isLoadingPrebuiltGkiReleases = false) }
+                return@launch
+            }
+            when (result) {
                 is Result.Success -> {
-                    val assets = result.data
-                        .flatMap(::prebuiltGkiAssetsFromRelease)
+                    val releases = result.data
+                        .map(::prebuiltGkiReleaseFromGitHub)
+                        .distinctBy { it.id }
+                        .sortedWith(prebuiltGkiReleaseComparator())
+                    _uiState.update {
+                        it.copy(
+                            prebuiltGkiReleases = releases,
+                            isLoadingPrebuiltGkiReleases = false
+                        )
+                    }
+                }
+                is Result.Error -> _uiState.update {
+                    it.copy(isLoadingPrebuiltGkiReleases = false, error = "获取预编译 GKI Release 失败: ${result.message}")
+                }
+                else -> _uiState.update { it.copy(isLoadingPrebuiltGkiReleases = false) }
+            }
+        }
+    }
+
+    fun loadPrebuiltGkiAssets(release: PrebuiltGkiRelease, force: Boolean = false) {
+        val state = _uiState.value
+        if (!state.prebuiltGkiEnabled || !state.isLoggedIn) return
+        if (release.id in state.loadingPrebuiltGkiAssetReleaseIds) return
+        if (!force && state.prebuiltGkiAssetsByReleaseId.containsKey(release.id)) return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    error = null,
+                    loadingPrebuiltGkiAssetReleaseIds = it.loadingPrebuiltGkiAssetReleaseIds + release.id
+                )
+            }
+            val result = if (release.apiId > 0L) {
+                github.listReleaseAssets(BuildConfig.SOURCE_REPO_OWNER, BuildConfig.SOURCE_REPO_NAME, release.apiId)
+            } else {
+                when (val fallback = github.getReleaseByTag(
+                    BuildConfig.SOURCE_REPO_OWNER,
+                    BuildConfig.SOURCE_REPO_NAME,
+                    release.tagName
+                )) {
+                    is Result.Success -> Result.Success(fallback.data?.assets.orEmpty())
+                    is Result.Error -> fallback
+                    Result.Loading -> Result.Loading
+                }
+            }
+            if (!_uiState.value.prebuiltGkiEnabled) {
+                _uiState.update {
+                    it.copy(loadingPrebuiltGkiAssetReleaseIds = it.loadingPrebuiltGkiAssetReleaseIds - release.id)
+                }
+                return@launch
+            }
+            when (result) {
+                is Result.Success -> {
+                    val assets = prebuiltGkiAssetsFromReleaseAssets(release, result.data)
                         .filter(::isPrebuiltGkiCandidate)
                         .distinctBy { it.id }
                         .sortedWith(prebuiltGkiComparator(_uiState.value.recommendedBuildConfig))
                     _uiState.update {
                         it.copy(
-                            prebuiltGkiAssets = assets,
-                            isLoadingPrebuiltGki = false,
-                            recommendedPrebuiltGkiAssetIds = recommendedPrebuiltAssetIds(assets, it.recommendedBuildConfig)
+                            prebuiltGkiAssetsByReleaseId = it.prebuiltGkiAssetsByReleaseId + (release.id to assets),
+                            loadingPrebuiltGkiAssetReleaseIds = it.loadingPrebuiltGkiAssetReleaseIds - release.id
                         )
                     }
                 }
                 is Result.Error -> _uiState.update {
-                    it.copy(isLoadingPrebuiltGki = false, error = "获取预编译 GKI 失败: ${result.message}")
+                    it.copy(
+                        loadingPrebuiltGkiAssetReleaseIds = it.loadingPrebuiltGkiAssetReleaseIds - release.id,
+                        error = "获取 ${release.name} 资产失败: ${result.message}"
+                    )
                 }
-                else -> _uiState.update { it.copy(isLoadingPrebuiltGki = false) }
+                Result.Loading -> _uiState.update {
+                    it.copy(loadingPrebuiltGkiAssetReleaseIds = it.loadingPrebuiltGkiAssetReleaseIds - release.id)
+                }
             }
         }
     }
@@ -1274,14 +1332,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             if (v) it.copy(prebuiltGkiEnabled = true) else it.copy(
                 prebuiltGkiEnabled = false,
-                prebuiltGkiAssets = emptyList(),
-                isLoadingPrebuiltGki = false,
-                recommendedPrebuiltGkiAssetIds = emptySet(),
+                prebuiltGkiReleases = emptyList(),
+                isLoadingPrebuiltGkiReleases = false,
+                prebuiltGkiAssetsByReleaseId = emptyMap(),
+                loadingPrebuiltGkiAssetReleaseIds = emptySet(),
                 downloadProgress = it.downloadProgress.filterKeys { key -> key >= 0L }
             )
         }
         prefs.setPrebuiltGkiEnabled(v)
-        if (v) loadPrebuiltGki(force = true)
     }
     fun updateBuildConfig(config: KernelBuildConfig) {
         val normalized = KernelSupport.normalize(config)
@@ -1320,8 +1378,25 @@ private fun detectRecommendedBuildConfig(): KernelBuildConfig? {
     return KernelSupport.recommendedFromKernel(kernelVersion)
 }
 
-private fun prebuiltGkiAssetsFromRelease(release: GitHubRelease): List<PrebuiltGkiAsset> =
-    release.assets.map { asset ->
+private fun prebuiltGkiReleaseFromGitHub(release: GitHubReleaseSummary): PrebuiltGkiRelease {
+    val fallbackId = release.tagName.hashCode().toLong().let { if (it < 0) -it else it }
+    return PrebuiltGkiRelease(
+        id = if (release.id != 0L) release.id else fallbackId,
+        apiId = release.id,
+        tagName = release.tagName,
+        name = release.name?.takeIf { it.isNotBlank() } ?: release.tagName,
+        htmlUrl = release.htmlUrl,
+        publishedAt = release.publishedAt.orEmpty(),
+        body = release.body.orEmpty(),
+        assetCount = 0
+    )
+}
+
+private fun prebuiltGkiAssetsFromReleaseAssets(
+    release: PrebuiltGkiRelease,
+    assets: List<ReleaseAsset>
+): List<PrebuiltGkiAsset> =
+    assets.map { asset ->
         val fallbackId = "${release.tagName}/${asset.name}".hashCode().toLong().let {
             if (it < 0) -it else it
         }
@@ -1332,12 +1407,16 @@ private fun prebuiltGkiAssetsFromRelease(release: GitHubRelease): List<PrebuiltG
             browserDownloadUrl = asset.browserDownloadUrl,
             contentType = asset.contentType,
             releaseTag = release.tagName,
-            releaseName = release.name ?: release.tagName,
+            releaseName = release.name,
             releaseHtmlUrl = release.htmlUrl,
-            publishedAt = release.publishedAt.orEmpty(),
-            releaseBody = release.body.orEmpty()
+            publishedAt = release.publishedAt,
+            releaseBody = release.body
         )
     }
+
+private fun prebuiltGkiReleaseComparator(): Comparator<PrebuiltGkiRelease> =
+    compareByDescending<PrebuiltGkiRelease> { it.publishedAt }
+        .thenBy { it.name }
 
 private fun isPrebuiltGkiCandidate(asset: PrebuiltGkiAsset): Boolean {
     val lower = asset.name.lowercase()
@@ -1345,17 +1424,6 @@ private fun isPrebuiltGkiCandidate(asset: PrebuiltGkiAsset): Boolean {
     return type in setOf(ArtifactType.KERNEL_PACKAGE, ArtifactType.KERNEL_IMG, ArtifactType.ANYKERNEL3) ||
         ((lower.endsWith(".img") || lower.endsWith(".zip")) &&
             listOf("gki", "kernel", "boot", "anykernel", "ak3").any { lower.contains(it) })
-}
-
-private fun recommendedPrebuiltAssetIds(
-    assets: List<PrebuiltGkiAsset>,
-    recommended: KernelBuildConfig?
-): Set<Long> {
-    if (recommended == null) return emptySet()
-    val scored = assets.map { it to prebuiltRecommendationScore(it, recommended) }
-        .filter { it.second > 0 }
-    val best = scored.maxOfOrNull { it.second } ?: return emptySet()
-    return scored.filter { it.second == best }.map { it.first.id }.toSet()
 }
 
 private fun prebuiltGkiComparator(

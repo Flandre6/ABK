@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.RunCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,8 +68,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -78,6 +82,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,8 +100,10 @@ import com.abk.kernel.data.model.ArtifactType
 import com.abk.kernel.data.model.BuildArtifact
 import com.abk.kernel.data.model.BuildStatus
 import com.abk.kernel.data.model.DownloadedArtifact
+import com.abk.kernel.data.model.KernelBuildConfig
 import com.abk.kernel.data.model.PREBUILT_GKI_RUN_ID
 import com.abk.kernel.data.model.PrebuiltGkiAsset
+import com.abk.kernel.data.model.PrebuiltGkiRelease
 import com.abk.kernel.ui.components.ExpressiveEmptyState
 import com.abk.kernel.ui.components.ExpressiveHeroCard
 import com.abk.kernel.ui.components.ExpressiveSectionCard
@@ -117,7 +124,9 @@ fun FlashScreen(vm: MainViewModel) {
     val state by vm.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var activeContentTab by rememberSaveable { mutableStateOf(FlashContentTab.Workflows) }
     var selectedRunId by remember { mutableStateOf<Long?>(null) }
+    var selectedPrebuiltReleaseId by remember { mutableStateOf<Long?>(null) }
     var selectedItem by remember { mutableStateOf<DownloadedArtifact?>(null) }
     var deleteFileTarget by remember { mutableStateOf<DownloadedArtifact?>(null) }
     var deleteWorkflowTarget by remember { mutableStateOf<WorkflowArtifactGroup?>(null) }
@@ -130,6 +139,7 @@ fun FlashScreen(vm: MainViewModel) {
     var terminalLog by remember { mutableStateOf<List<String>>(emptyList()) }
     var terminalSuccess by remember { mutableStateOf<Boolean?>(null) }
     val rootGranted = state.rootGranted
+    val currentContentTab = if (state.prebuiltGkiEnabled) activeContentTab else FlashContentTab.Workflows
 
     val remoteArtifacts = remember(state.artifacts) {
         state.artifacts.filter {
@@ -147,16 +157,30 @@ fun FlashScreen(vm: MainViewModel) {
         buildWorkflowGroups(remoteArtifacts, workflowDownloadedArtifacts)
     }
     val selectedGroup = selectedRunId?.let { id -> workflowGroups.firstOrNull { it.runId == id } }
+    val selectedPrebuiltRelease = selectedPrebuiltReleaseId?.let { id ->
+        state.prebuiltGkiReleases.firstOrNull { it.id == id }
+    }
 
     fun returnToWorkflowList() {
         selectedRunId = null
     }
 
-    BackHandler(enabled = selectedRunId != null, onBack = ::returnToWorkflowList)
-    PredictiveBackHandler(enabled = selectedRunId != null) { progress ->
+    fun returnToPrebuiltReleaseList() {
+        selectedPrebuiltReleaseId = null
+    }
+
+    fun returnToTopList() {
+        selectedRunId = null
+        selectedPrebuiltReleaseId = null
+    }
+
+    BackHandler(enabled = selectedRunId != null || selectedPrebuiltReleaseId != null) {
+        if (selectedRunId != null) returnToWorkflowList() else returnToPrebuiltReleaseList()
+    }
+    PredictiveBackHandler(enabled = selectedRunId != null || selectedPrebuiltReleaseId != null) { progress ->
         try {
             progress.collect { }
-            returnToWorkflowList()
+            if (selectedRunId != null) returnToWorkflowList() else returnToPrebuiltReleaseList()
         } catch (_: CancellationException) {
         }
     }
@@ -165,12 +189,32 @@ fun FlashScreen(vm: MainViewModel) {
         if (state.forkRepo != null) vm.loadRecentRuns()
     }
 
-    LaunchedEffect(state.prebuiltGkiEnabled, state.isLoggedIn) {
-        if (state.prebuiltGkiEnabled && state.isLoggedIn) vm.loadPrebuiltGki()
+    LaunchedEffect(state.prebuiltGkiEnabled) {
+        if (!state.prebuiltGkiEnabled) {
+            activeContentTab = FlashContentTab.Workflows
+            selectedPrebuiltReleaseId = null
+        }
+    }
+
+    LaunchedEffect(currentContentTab, state.prebuiltGkiEnabled, state.isLoggedIn) {
+        if (currentContentTab == FlashContentTab.PrebuiltGki && state.prebuiltGkiEnabled && state.isLoggedIn) {
+            vm.loadPrebuiltGkiReleases()
+        }
+    }
+
+    LaunchedEffect(selectedPrebuiltRelease?.id, state.prebuiltGkiEnabled, state.isLoggedIn) {
+        val release = selectedPrebuiltRelease
+        if (release != null && state.prebuiltGkiEnabled && state.isLoggedIn) {
+            vm.loadPrebuiltGkiAssets(release)
+        }
     }
 
     LaunchedEffect(workflowGroups, selectedRunId) {
         if (selectedRunId != null && selectedGroup == null) selectedRunId = null
+    }
+
+    LaunchedEffect(state.prebuiltGkiReleases, selectedPrebuiltReleaseId) {
+        if (selectedPrebuiltReleaseId != null && selectedPrebuiltRelease == null) selectedPrebuiltReleaseId = null
     }
 
     fun showFailure(title: String, lines: List<String>) {
@@ -378,6 +422,26 @@ fun FlashScreen(vm: MainViewModel) {
         )
     }
 
+    val selectedPrebuiltAssets = selectedPrebuiltRelease?.let {
+        state.prebuiltGkiAssetsByReleaseId[it.id].orEmpty()
+    }.orEmpty()
+    val selectedPrebuiltAssetsLoading = selectedPrebuiltRelease?.id
+        ?.let { it in state.loadingPrebuiltGkiAssetReleaseIds } == true
+    var prebuiltFilter by remember(selectedPrebuiltRelease?.id) {
+        mutableStateOf(defaultPrebuiltFilter(state.recommendedBuildConfig ?: state.buildConfig))
+    }
+    val filteredPrebuiltAssets = remember(selectedPrebuiltAssets, prebuiltFilter) {
+        val candidates = selectedPrebuiltAssets.filter(::isPrebuiltGkiCandidateUi)
+        if (prebuiltFilter.onlyMatches) {
+            candidates.filter { prebuiltAssetMatchesFilter(it, prebuiltFilter) }
+        } else {
+            candidates
+        }
+    }
+    val recommendedPrebuiltIds = remember(filteredPrebuiltAssets, state.recommendedBuildConfig) {
+        recommendedPrebuiltAssetIdsForUi(filteredPrebuiltAssets, state.recommendedBuildConfig)
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = { ExpressiveTopBar(title = if (rootGranted) stringResource(R.string.flash_title) else "文件") }
@@ -390,138 +454,256 @@ fun FlashScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            if (selectedGroup == null) {
-                item {
-                    FlashHero(
-                        buildStatus = state.buildStatus,
-                        availableCount = remoteArtifacts.size,
-                        downloadedCount = state.downloadedArtifacts.size,
-                        rootGranted = rootGranted
-                    )
-                }
-
-                item {
-                    OutlinedButton(
-                        onClick = { vm.loadRecentRuns() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("联网刷新构建产物")
-                    }
-                }
-
-                if (state.prebuiltGkiEnabled) {
+            when {
+                selectedGroup != null -> {
                     item {
-                        PrebuiltGkiSection(
-                            assets = state.prebuiltGkiAssets,
-                            isLoading = state.isLoadingPrebuiltGki,
-                            recommendedIds = state.recommendedPrebuiltGkiAssetIds,
-                            downloadedArtifacts = state.downloadedArtifacts,
-                            progress = state.downloadProgress,
-                            onRefresh = { vm.loadPrebuiltGki(force = true) },
-                            onDownload = { vm.downloadPrebuiltGki(it) },
-                            onCopyPath = ::copyDownloadedFilePath,
-                            onInstall = ::installManager,
-                            onFlash = {
-                                selectedItem = it
-                                showFlashConfirm = true
-                            },
-                            onDelete = { deleteFileTarget = it },
-                            allowRootActions = rootGranted
-                        )
-                    }
-                }
-
-                if (workflowGroups.isNotEmpty()) {
-                    items(workflowGroups, key = { "workflow-${it.runId}" }) { group ->
-                        WorkflowRunCard(
-                            group = group,
-                            onClick = { selectedRunId = group.runId },
+                        WorkflowDetailHeader(
+                            group = selectedGroup,
+                            onBack = ::returnToWorkflowList,
                             onDelete = {
-                                deleteWorkflowTarget = group
+                                deleteWorkflowTarget = selectedGroup
                                 deleteRemoteWorkflowRun = false
                             }
                         )
                     }
-                } else {
-                    item {
-                        ExpressiveEmptyState(
-                            title = if (rootGranted) "暂无可刷写产物" else "暂无可查看文件",
-                            subtitle = if (rootGranted) {
-                                "构建成功后，ABK 会联网同步并按工作流整理产物。"
-                            } else {
-                                "构建成功后，可在这里下载并查看产物文件。"
-                            },
-                            icon = Icons.Default.Inbox
-                        )
+
+                    artifactCategoryOrder.forEach { category ->
+                        val remoteInCategory = selectedGroup.remote.filter {
+                            DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) == category
+                        }
+                        val matchedLocalPaths = remoteInCategory
+                            .flatMap { source -> selectedGroup.local.filter { DownloadUtils.matchesDownloadedArtifact(it, source) } }
+                            .map { it.filePath }
+                            .toSet()
+                        val localOnly = selectedGroup.local
+                            .filter { it.category == category && it.filePath !in matchedLocalPaths }
+
+                        if (remoteInCategory.isNotEmpty() || localOnly.isNotEmpty()) {
+                            item("category-${selectedGroup.runId}-${category.name}") {
+                                CategoryHeader(category)
+                            }
+                        }
+
+                        items(remoteInCategory, key = { "source-${it.id}" }) { artifact ->
+                            ArtifactSourceCard(
+                                artifact = artifact,
+                                downloadedFiles = selectedGroup.local.filter {
+                                    DownloadUtils.matchesDownloadedArtifact(it, artifact)
+                                },
+                                progress = state.downloadProgress[artifact.id],
+                                autoDownloadEligible = state.autoDownload &&
+                                    state.pendingAutoDownloadRunId == artifact.runId &&
+                                    DownloadUtils.shouldAutoDownload(artifact),
+                                onDownload = { vm.downloadArtifact(artifact) },
+                                onCopyPath = ::copyDownloadedFilePath,
+                                onInstall = ::installManager,
+                                onFlash = {
+                                    selectedItem = it
+                                    showFlashConfirm = true
+                                },
+                                onDelete = { deleteFileTarget = it },
+                                allowRootActions = rootGranted
+                            )
+                        }
+
+                        items(localOnly, key = { "local-${it.filePath}" }) { artifact ->
+                            LocalOnlyArtifactCard(
+                                artifact = artifact,
+                                onCopyPath = ::copyDownloadedFilePath,
+                                onInstall = ::installManager,
+                                onFlash = {
+                                    selectedItem = it
+                                    showFlashConfirm = true
+                                },
+                                onDelete = { deleteFileTarget = it },
+                                allowRootActions = rootGranted
+                            )
+                        }
                     }
                 }
-            } else {
-                item {
-                    WorkflowDetailHeader(
-                        group = selectedGroup,
-                        onBack = ::returnToWorkflowList,
-                        onDelete = {
-                            deleteWorkflowTarget = selectedGroup
-                            deleteRemoteWorkflowRun = false
+
+                selectedPrebuiltRelease != null -> {
+                    item {
+                        PrebuiltReleaseDetailHeader(
+                            release = selectedPrebuiltRelease,
+                            sourceCount = selectedPrebuiltAssets.size,
+                            visibleCount = filteredPrebuiltAssets.size,
+                            onBack = ::returnToPrebuiltReleaseList,
+                            onRefresh = { vm.loadPrebuiltGkiAssets(selectedPrebuiltRelease, force = true) }
+                        )
+                    }
+
+                    item {
+                        PrebuiltGkiFilterCard(
+                            filter = prebuiltFilter,
+                            onFilterChange = { prebuiltFilter = it }
+                        )
+                    }
+
+                    when {
+                        selectedPrebuiltAssetsLoading -> {
+                            item {
+                                LoadingRow("正在获取 ${selectedPrebuiltRelease.name} 的预编译 GKI")
+                            }
                         }
+                        filteredPrebuiltAssets.isEmpty() -> {
+                            item {
+                                ExpressiveEmptyState(
+                                    title = "未找到匹配资产",
+                                    subtitle = if (prebuiltFilter.onlyMatches) {
+                                        "当前 release 没有匹配筛选条件的 GKI、boot、img 或 AK3 资产。"
+                                    } else {
+                                        "当前 release 没有可识别的预编译 GKI 资产。"
+                                    },
+                                    icon = Icons.Default.Inbox
+                                )
+                            }
+                        }
+                        else -> {
+                            items(filteredPrebuiltAssets, key = { "prebuilt-${it.id}" }) { asset ->
+                                PrebuiltGkiAssetCard(
+                                    asset = asset,
+                                    recommended = asset.id in recommendedPrebuiltIds,
+                                    downloadedFiles = state.downloadedArtifacts.filter {
+                                        DownloadUtils.matchesDownloadedPrebuilt(it, asset)
+                                    },
+                                    progress = state.downloadProgress[DownloadUtils.prebuiltProgressKey(asset.id)],
+                                    onDownload = { vm.downloadPrebuiltGki(asset) },
+                                    onCopyPath = ::copyDownloadedFilePath,
+                                    onInstall = ::installManager,
+                                    onFlash = {
+                                        selectedItem = it
+                                        showFlashConfirm = true
+                                    },
+                                    onDelete = { deleteFileTarget = it },
+                                    allowRootActions = rootGranted
+                                )
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                item {
+                    FlashHero(
+                        buildStatus = state.buildStatus,
+                        availableCount = remoteArtifacts.size,
+                        downloadedCount = workflowDownloadedArtifacts.size,
+                        rootGranted = rootGranted
                     )
                 }
 
-                artifactCategoryOrder.forEach { category ->
-                    val remoteInCategory = selectedGroup.remote.filter {
-                        DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) == category
+                if (state.prebuiltGkiEnabled) {
+                    item {
+                        FlashContentTabs(
+                            active = activeContentTab,
+                            onSelect = {
+                                activeContentTab = it
+                                returnToTopList()
+                            }
+                        )
                     }
-                    val matchedLocalPaths = remoteInCategory
-                        .flatMap { source -> selectedGroup.local.filter { DownloadUtils.matchesDownloadedArtifact(it, source) } }
-                        .map { it.filePath }
-                        .toSet()
-                    val localOnly = selectedGroup.local
-                        .filter { it.category == category && it.filePath !in matchedLocalPaths }
+                }
 
-                    if (remoteInCategory.isNotEmpty() || localOnly.isNotEmpty()) {
-                        item("category-${selectedGroup.runId}-${category.name}") {
-                            CategoryHeader(category)
+                when (currentContentTab) {
+                    FlashContentTab.Workflows -> {
+                        item {
+                            OutlinedButton(
+                                onClick = { vm.loadRecentRuns() },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("联网刷新构建产物")
+                            }
+                        }
+
+                        if (workflowGroups.isNotEmpty()) {
+                            items(workflowGroups, key = { "workflow-${it.runId}" }) { group ->
+                                WorkflowRunCard(
+                                    group = group,
+                                    onClick = { selectedRunId = group.runId },
+                                    onDelete = {
+                                        deleteWorkflowTarget = group
+                                        deleteRemoteWorkflowRun = false
+                                    }
+                                )
+                            }
+                        } else {
+                            item {
+                                ExpressiveEmptyState(
+                                    title = if (rootGranted) "暂无可刷写产物" else "暂无可查看文件",
+                                    subtitle = if (rootGranted) {
+                                        "构建成功后，ABK 会联网同步并按工作流整理产物。"
+                                    } else {
+                                        "构建成功后，可在这里下载并查看产物文件。"
+                                    },
+                                    icon = Icons.Default.Inbox
+                                )
+                            }
                         }
                     }
 
-                    items(remoteInCategory, key = { "source-${it.id}" }) { artifact ->
-                        ArtifactSourceCard(
-                            artifact = artifact,
-                            downloadedFiles = selectedGroup.local.filter {
-                                DownloadUtils.matchesDownloadedArtifact(it, artifact)
-                            },
-                            progress = state.downloadProgress[artifact.id],
-                            autoDownloadEligible = state.autoDownload &&
-                                state.pendingAutoDownloadRunId == artifact.runId &&
-                                DownloadUtils.shouldAutoDownload(artifact),
-                            onDownload = { vm.downloadArtifact(artifact) },
-                            onCopyPath = ::copyDownloadedFilePath,
-                            onInstall = ::installManager,
-                            onFlash = {
-                                selectedItem = it
-                                showFlashConfirm = true
-                            },
-                            onDelete = { deleteFileTarget = it },
-                            allowRootActions = rootGranted
-                        )
-                    }
+                    FlashContentTab.PrebuiltGki -> {
+                        if (state.prebuiltGkiEnabled) {
+                            item {
+                                PrebuiltReleaseListHeader(
+                                    releaseCount = state.prebuiltGkiReleases.size,
+                                    isLoading = state.isLoadingPrebuiltGkiReleases,
+                                    onRefresh = { vm.loadPrebuiltGkiReleases(force = true) }
+                                )
+                            }
 
-                    items(localOnly, key = { "local-${it.filePath}" }) { artifact ->
-                        LocalOnlyArtifactCard(
-                            artifact = artifact,
-                            onCopyPath = ::copyDownloadedFilePath,
-                            onInstall = ::installManager,
-                            onFlash = {
-                                selectedItem = it
-                                showFlashConfirm = true
-                            },
-                            onDelete = { deleteFileTarget = it },
-                            allowRootActions = rootGranted
-                        )
+                            when {
+                                state.isLoadingPrebuiltGkiReleases -> {
+                                    item {
+                                        LoadingRow("正在获取 Release")
+                                    }
+                                }
+                                state.prebuiltGkiReleases.isEmpty() -> {
+                                    item {
+                                        ExpressiveEmptyState(
+                                            title = "暂无预编译 GKI Release",
+                                            subtitle = "本仓库 Release 中暂未发现可浏览的版本。",
+                                            icon = Icons.Default.CloudDownload
+                                        )
+                                    }
+                                }
+                                else -> {
+                                    items(state.prebuiltGkiReleases, key = { "release-${it.id}" }) { release ->
+                                        PrebuiltReleaseCard(
+                                            release = release,
+                                            onClick = { selectedPrebuiltReleaseId = release.id }
+                                        )
+                                    }
+                                }
+                            }
+
+                            val localPrebuiltFiles = state.downloadedArtifacts.filter {
+                                it.runId == PREBUILT_GKI_RUN_ID
+                            }
+                            if (localPrebuiltFiles.isNotEmpty()) {
+                                item {
+                                    CategoryHeader(ArtifactCategory.KERNEL)
+                                }
+                                items(localPrebuiltFiles, key = { "prebuilt-local-${it.filePath}" }) { artifact ->
+                                    LocalOnlyArtifactCard(
+                                        artifact = artifact,
+                                        onCopyPath = ::copyDownloadedFilePath,
+                                        onInstall = ::installManager,
+                                        onFlash = {
+                                            selectedItem = it
+                                            showFlashConfirm = true
+                                        },
+                                        onDelete = { deleteFileTarget = it },
+                                        allowRootActions = rootGranted
+                                    )
+                                }
+                            }
+                        }
                     }
+                }
                 }
             }
         }
@@ -577,98 +759,195 @@ private fun FlashHero(
 }
 
 @Composable
-private fun PrebuiltGkiSection(
-    assets: List<PrebuiltGkiAsset>,
-    isLoading: Boolean,
-    recommendedIds: Set<Long>,
-    downloadedArtifacts: List<DownloadedArtifact>,
-    progress: Map<Long, Int>,
-    onRefresh: () -> Unit,
-    onDownload: (PrebuiltGkiAsset) -> Unit,
-    onCopyPath: (DownloadedArtifact) -> Unit,
-    onInstall: (DownloadedArtifact) -> Unit,
-    onFlash: (DownloadedArtifact) -> Unit,
-    onDelete: (DownloadedArtifact) -> Unit,
-    allowRootActions: Boolean
+private fun FlashContentTabs(
+    active: FlashContentTab,
+    onSelect: (FlashContentTab) -> Unit
 ) {
-    val matchedLocalPaths = assets
-        .flatMap { asset -> downloadedArtifacts.filter { DownloadUtils.matchesDownloadedPrebuilt(it, asset) } }
-        .map { it.filePath }
-        .toSet()
-    val localOnly = downloadedArtifacts.filter {
-        it.runId == PREBUILT_GKI_RUN_ID && it.filePath !in matchedLocalPaths
+    TabRow(selectedTabIndex = FlashContentTab.entries.indexOf(active)) {
+        FlashContentTab.entries.forEach { tab ->
+            Tab(
+                selected = active == tab,
+                onClick = { onSelect(tab) },
+                text = { Text(tab.label) },
+                icon = {
+                    Icon(
+                        if (tab == FlashContentTab.Workflows) Icons.Default.FolderSpecial else Icons.Default.CloudDownload,
+                        null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            )
+        }
     }
+}
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+@Composable
+private fun PrebuiltReleaseListHeader(
+    releaseCount: Int,
+    isLoading: Boolean,
+    onRefresh: () -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.CloudDownload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Column(Modifier.weight(1f)) {
+            Text("预编译 GKI", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "$releaseCount 个 Release · 进入子页面后筛选资产",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        OutlinedButton(onClick = onRefresh, enabled = !isLoading, shape = RoundedCornerShape(16.dp)) {
+            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("刷新")
+        }
+    }
+}
+
+@Composable
+private fun PrebuiltReleaseCard(
+    release: PrebuiltGkiRelease,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Default.CloudDownload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        release.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "${release.tagName} · ${releaseDateLabel(release.publishedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ExpressiveStatusChip(
+                    label = if (release.assetCount > 0) "${release.assetCount} 个资产" else "点进后加载资产",
+                    color = MaterialTheme.colorScheme.primary
+                )
+                ExpressiveStatusChip(label = "手动下载", color = MaterialTheme.colorScheme.secondary)
+                ExpressiveStatusChip(label = "分 Release 筛选", color = MaterialTheme.colorScheme.tertiary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrebuiltReleaseDetailHeader(
+    release: PrebuiltGkiRelease,
+    sourceCount: Int,
+    visibleCount: Int,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    ExpressiveSectionCard(
+        title = release.name,
+        subtitle = "${release.tagName} · ${releaseDateLabel(release.publishedAt)}",
+        icon = Icons.Default.CloudDownload
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Default.CloudDownload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Column(Modifier.weight(1f)) {
-                Text("预编译 GKI", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "来自本仓库 Release，需手动下载",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "返回")
             }
-            OutlinedButton(onClick = onRefresh, enabled = !isLoading, shape = RoundedCornerShape(16.dp)) {
-                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("刷新")
+            Text(
+                text = "$visibleCount / $sourceCount 个可见资产",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "刷新资产")
             }
         }
+    }
+}
 
-        when {
-            isLoading -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("正在获取预编译 GKI")
-                }
-            }
-            assets.isEmpty() && localOnly.isEmpty() -> {
-                Text(
-                    "未找到可用的预编译 GKI Release 资产。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+@Composable
+private fun PrebuiltGkiFilterCard(
+    filter: PrebuiltGkiFilter,
+    onFilterChange: (PrebuiltGkiFilter) -> Unit
+) {
+    ExpressiveSectionCard(
+        title = "筛选器",
+        subtitle = "按构建参数筛选当前 Release",
+        icon = Icons.Default.Tune
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(
+                value = filter.androidVersion,
+                onValueChange = { onFilterChange(filter.copy(androidVersion = it)) },
+                label = { Text("Android 版本") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = filter.kernelVersion,
+                    onValueChange = { onFilterChange(filter.copy(kernelVersion = it)) },
+                    label = { Text("内核版本") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = filter.subLevel,
+                    onValueChange = { onFilterChange(filter.copy(subLevel = it)) },
+                    label = { Text("小版本") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
                 )
             }
-            else -> {
-                assets.forEach { asset ->
-                    PrebuiltGkiAssetCard(
-                        asset = asset,
-                        recommended = asset.id in recommendedIds,
-                        downloadedFiles = downloadedArtifacts.filter {
-                            DownloadUtils.matchesDownloadedPrebuilt(it, asset)
-                        },
-                        progress = progress[DownloadUtils.prebuiltProgressKey(asset.id)],
-                        onDownload = { onDownload(asset) },
-                        onCopyPath = onCopyPath,
-                        onInstall = onInstall,
-                        onFlash = onFlash,
-                        onDelete = onDelete,
-                        allowRootActions = allowRootActions
-                    )
-                }
-                localOnly.forEach { artifact ->
-                    LocalOnlyArtifactCard(
-                        artifact = artifact,
-                        onCopyPath = onCopyPath,
-                        onInstall = onInstall,
-                        onFlash = onFlash,
-                        onDelete = onDelete,
-                        allowRootActions = allowRootActions
-                    )
-                }
+            OutlinedTextField(
+                value = filter.osPatchLevel,
+                onValueChange = { onFilterChange(filter.copy(osPatchLevel = it)) },
+                label = { Text("补丁级别") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable {
+                    onFilterChange(filter.copy(onlyMatches = !filter.onlyMatches))
+                },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = filter.onlyMatches,
+                    onCheckedChange = { onFilterChange(filter.copy(onlyMatches = it)) }
+                )
+                Text("只看匹配当前筛选条件的资产")
             }
         }
+    }
+}
+
+@Composable
+private fun LoadingRow(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(text)
     }
 }
 
@@ -1233,6 +1512,105 @@ private fun flashCommandPreview(item: DownloadedArtifact) = when (item.type) {
     ArtifactType.ANYKERNEL3 -> "flash-ak3 ${item.name}"
     ArtifactType.SUSFS_MODULE -> "install-module ${item.name}"
     else -> "run ${item.name}"
+}
+
+private enum class FlashContentTab(val label: String) {
+    Workflows("构建产物"),
+    PrebuiltGki("预编译 GKI")
+}
+
+private data class PrebuiltGkiFilter(
+    val androidVersion: String,
+    val kernelVersion: String,
+    val subLevel: String,
+    val osPatchLevel: String,
+    val onlyMatches: Boolean = true
+)
+
+private fun defaultPrebuiltFilter(config: KernelBuildConfig): PrebuiltGkiFilter = PrebuiltGkiFilter(
+    androidVersion = config.androidVersion,
+    kernelVersion = config.kernelVersion,
+    subLevel = config.subLevel.takeUnless { it == "X" }.orEmpty(),
+    osPatchLevel = config.osPatchLevel
+)
+
+private fun releaseDateLabel(value: String): String =
+    value.takeIf { it.length >= 10 }?.take(10) ?: "未知日期"
+
+private fun isPrebuiltGkiCandidateUi(asset: PrebuiltGkiAsset): Boolean {
+    val lower = asset.name.lowercase()
+    val type = DownloadUtils.classifyArtifact(asset.name)
+    return type in setOf(ArtifactType.KERNEL_PACKAGE, ArtifactType.KERNEL_IMG, ArtifactType.ANYKERNEL3) ||
+        ((lower.endsWith(".img") || lower.endsWith(".zip")) &&
+            listOf("gki", "kernel", "boot", "anykernel", "ak3").any { lower.contains(it) })
+}
+
+private fun prebuiltAssetMatchesFilter(asset: PrebuiltGkiAsset, filter: PrebuiltGkiFilter): Boolean {
+    val haystack = prebuiltHaystack(asset)
+    return prebuiltAndroidMatches(haystack, filter.androidVersion) &&
+        prebuiltKernelMatches(haystack, filter.kernelVersion, filter.subLevel) &&
+        prebuiltTextMatches(haystack, filter.osPatchLevel)
+}
+
+private fun recommendedPrebuiltAssetIdsForUi(
+    assets: List<PrebuiltGkiAsset>,
+    recommended: KernelBuildConfig?
+): Set<Long> {
+    if (recommended == null) return emptySet()
+    val scored = assets.map { it to prebuiltRecommendationScoreForUi(it, recommended) }
+        .filter { it.second > 0 }
+    val best = scored.maxOfOrNull { it.second } ?: return emptySet()
+    return scored.filter { it.second == best }.map { it.first.id }.toSet()
+}
+
+private fun prebuiltRecommendationScoreForUi(asset: PrebuiltGkiAsset, recommended: KernelBuildConfig?): Int {
+    recommended ?: return 0
+    if (recommended.subLevel == "X") return 0
+    val haystack = prebuiltHaystack(asset)
+    val kernelSub = Regex(
+        """(^|[^0-9])${Regex.escape(recommended.kernelVersion)}[.-]?${Regex.escape(recommended.subLevel)}([^0-9]|$)"""
+    ).containsMatchIn(haystack)
+    if (!kernelSub) return 0
+
+    val androidNumber = recommended.androidVersion.removePrefix("android")
+    val hasAndroid = haystack.contains(recommended.androidVersion.lowercase()) ||
+        haystack.contains("android-$androidNumber") ||
+        haystack.contains("a$androidNumber")
+    val hasPatch = recommended.osPatchLevel.isNotBlank() && haystack.contains(recommended.osPatchLevel.lowercase())
+    return 10 + (if (hasAndroid) 5 else 0) + (if (hasPatch) 8 else 0)
+}
+
+private fun prebuiltHaystack(asset: PrebuiltGkiAsset): String =
+    listOf(asset.name, asset.releaseTag, asset.releaseName, asset.releaseBody)
+        .joinToString(" ")
+        .lowercase()
+        .replace('_', '-')
+
+private fun prebuiltAndroidMatches(haystack: String, value: String): Boolean {
+    val android = value.trim().lowercase().replace('_', '-')
+    if (android.isBlank()) return true
+    val number = android.removePrefix("android").removePrefix("-")
+    return haystack.contains(android) ||
+        (number.isNotBlank() && (
+            haystack.contains("android$number") ||
+                haystack.contains("android-$number") ||
+                haystack.contains("a$number")
+            ))
+}
+
+private fun prebuiltKernelMatches(haystack: String, kernelVersion: String, subLevel: String): Boolean {
+    val kernel = kernelVersion.trim()
+    val sub = subLevel.trim()
+    if (kernel.isBlank()) return true
+    if (sub.isBlank()) return haystack.contains(kernel.lowercase())
+    return Regex(
+        """(^|[^0-9])${Regex.escape(kernel)}[.-]?${Regex.escape(sub)}([^0-9]|$)"""
+    ).containsMatchIn(haystack)
+}
+
+private fun prebuiltTextMatches(haystack: String, value: String): Boolean {
+    val text = value.trim().lowercase().replace('_', '-')
+    return text.isBlank() || haystack.contains(text)
 }
 
 private val artifactCategoryOrder = listOf(

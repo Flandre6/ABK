@@ -176,7 +176,18 @@ data class GitHubRelease(
     @SerializedName("html_url") val htmlUrl: String,
     @SerializedName("published_at") val publishedAt: String? = null,
     val body: String? = null,
+    @SerializedName("assets_url") val assetsUrl: String? = null,
     val assets: List<ReleaseAsset> = emptyList()
+)
+
+data class GitHubReleaseSummary(
+    val id: Long = 0L,
+    val name: String? = null,
+    @SerializedName("tag_name") val tagName: String,
+    @SerializedName("html_url") val htmlUrl: String,
+    @SerializedName("published_at") val publishedAt: String? = null,
+    val body: String? = null,
+    @SerializedName("assets_url") val assetsUrl: String? = null
 )
 
 data class ReleaseAsset(
@@ -198,6 +209,17 @@ data class PrebuiltGkiAsset(
     val releaseHtmlUrl: String,
     val publishedAt: String,
     val releaseBody: String = ""
+)
+
+data class PrebuiltGkiRelease(
+    val id: Long,
+    val apiId: Long = id,
+    val tagName: String,
+    val name: String,
+    val htmlUrl: String,
+    val publishedAt: String,
+    val body: String = "",
+    val assetCount: Int = 0
 )
 
 // GitHub Device Flow OAuth

@@ -109,7 +109,7 @@ interface GitHubApiService {
         @Path("repo") repo: String,
         @Query("per_page") perPage: Int = 30,
         @Query("page") page: Int = 1
-    ): Response<List<GitHubRelease>>
+    ): Response<List<GitHubReleaseSummary>>
 
     @GET("repos/{owner}/{repo}/releases/tags/{tag}")
     suspend fun getReleaseByTag(
@@ -117,6 +117,15 @@ interface GitHubApiService {
         @Path("repo") repo: String,
         @Path("tag") tag: String
     ): Response<GitHubRelease>
+
+    @GET("repos/{owner}/{repo}/releases/{release_id}/assets")
+    suspend fun listReleaseAssets(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("release_id") releaseId: Long,
+        @Query("per_page") perPage: Int = 100,
+        @Query("page") page: Int = 1
+    ): Response<List<ReleaseAsset>>
 
     @Streaming
     @GET("repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip")
