@@ -28,7 +28,7 @@ val LocalUiSurfaceAlpha = staticCompositionLocalOf { 1f }
 @Composable
 fun uiSurfaceColor(color: Color): Color {
     val alpha = LocalUiSurfaceAlpha.current
-    return if (alpha >= 0.995f) color else color.copy(alpha = alpha)
+    return if (alpha >= 0.995f) color else color.copy(alpha = color.alpha * alpha)
 }
 
 @Composable

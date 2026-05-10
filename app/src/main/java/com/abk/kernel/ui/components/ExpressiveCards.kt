@@ -327,7 +327,7 @@ fun ExpressiveStatusChip(
             }
         },
         colors = AssistChipDefaults.assistChipColors(
-            disabledContainerColor = color.copy(alpha = 0.14f),
+            disabledContainerColor = uiSurfaceColor(color.copy(alpha = 0.14f)),
             disabledLabelColor = color,
             disabledLeadingIconContentColor = color
         ),

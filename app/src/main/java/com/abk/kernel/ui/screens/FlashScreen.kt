@@ -771,7 +771,11 @@ private fun FlashContentTabs(
     active: FlashContentTab,
     onSelect: (FlashContentTab) -> Unit
 ) {
-    TabRow(selectedTabIndex = FlashContentTab.entries.indexOf(active)) {
+    TabRow(
+        selectedTabIndex = FlashContentTab.entries.indexOf(active),
+        containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
+        contentColor = MaterialTheme.colorScheme.primary
+    ) {
         FlashContentTab.entries.forEach { tab ->
             Tab(
                 selected = active == tab,
@@ -819,7 +823,10 @@ private fun PrebuiltReleaseCard(
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
+        )
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1027,7 +1034,10 @@ private fun PrebuiltGkiAssetCard(
         label = "prebuilt-gki-download"
     )
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
+        )
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ArtifactHeader(
@@ -1090,7 +1100,10 @@ private fun WorkflowRunCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
+        )
     ) {
         Column(
             modifier = Modifier
@@ -1206,7 +1219,10 @@ private fun ArtifactSourceCard(
         label = "artifact-download"
     )
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
+        )
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ArtifactHeader(
@@ -1259,7 +1275,10 @@ private fun LocalOnlyArtifactCard(
     allowRootActions: Boolean
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer)
+        )
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ArtifactHeader(
