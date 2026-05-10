@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -947,9 +948,10 @@ private fun FlashDetailBackSurface(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val childPageTopInset = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+        val childPageBottomInset = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
         val childPageModifier = Modifier
             .fillMaxWidth()
-            .height(maxHeight + childPageTopInset)
+            .height(maxHeight + childPageTopInset + childPageBottomInset)
             .offset(y = -childPageTopInset)
         backgroundContent()
         Box(

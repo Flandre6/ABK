@@ -159,9 +159,10 @@ fun SettingsScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val childPageTopInset = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+        val childPageBottomInset = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
         val childPageModifier = Modifier
             .fillMaxWidth()
-            .height(maxHeight + childPageTopInset)
+            .height(maxHeight + childPageTopInset + childPageBottomInset)
             .offset(y = -childPageTopInset)
         Scaffold(
             containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
