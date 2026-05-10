@@ -131,7 +131,8 @@ data class BuildParameterSummary(
     val virtualizationSupport: String = "",
     val customInjection: String = "",
     val stockConfig: String = "",
-    val source: String = "workflow_log"
+    val source: String = "workflow_log",
+    val extraRows: Map<String, String>? = null
 )
 
 data class Artifact(

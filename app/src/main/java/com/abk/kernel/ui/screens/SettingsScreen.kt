@@ -207,8 +207,8 @@ fun SettingsScreen(vm: MainViewModel) {
             SettingsGroup(title = "导航") {
                 SwitchSettingsItem(
                     icon = Icons.Default.ArrowBack,
-                    title = "预测性返回手势",
-                    subtitle = "开启后使用 Android 预测性返回动画，关闭后保留普通返回",
+                    title = "应用内 M3E 返回动效",
+                    subtitle = "使用 Material 3 Expressive 的页面返回动画，不依赖系统预测性返回",
                     checked = state.predictiveBackEnabled,
                     onCheckedChange = { vm.setPredictiveBackEnabled(it) }
                 )

@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -73,8 +72,6 @@ import com.abk.kernel.ui.theme.LocalUiSurfaceAlpha
 import com.abk.kernel.ui.theme.uiSurfaceColor
 import com.abk.kernel.viewmodel.AuthStep
 import com.abk.kernel.viewmodel.MainViewModel
-import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.flow.collect
 
 class MainActivity : ComponentActivity() {
 
@@ -297,15 +294,6 @@ private fun AbkMainScaffold(vm: MainViewModel) {
     }
 
     BackHandler(onBack = ::handleTopLevelBack)
-    if (state.predictiveBackEnabled) {
-        PredictiveBackHandler { progress ->
-            try {
-                progress.collect { }
-                handleTopLevelBack()
-            } catch (_: CancellationException) {
-            }
-        }
-    }
 
     Scaffold(
         containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),

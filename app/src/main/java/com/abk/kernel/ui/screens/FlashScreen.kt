@@ -6,16 +6,12 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -107,6 +103,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.abk.kernel.R
 import com.abk.kernel.data.model.ArtifactCategory
 import com.abk.kernel.data.model.ArtifactType
@@ -128,9 +129,7 @@ import com.abk.kernel.ui.theme.uiSurfaceColor
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.RootUtils
 import com.abk.kernel.viewmodel.MainViewModel
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -141,12 +140,14 @@ fun FlashScreen(vm: MainViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var activeContentTab by rememberSaveable { mutableStateOf(FlashContentTab.Workflows) }
+    val navController = rememberNavController()
     var selectedRunId by remember { mutableStateOf<Long?>(null) }
     var selectedPrebuiltReleaseId by remember { mutableStateOf<Long?>(null) }
     var selectedItem by remember { mutableStateOf<DownloadedArtifact?>(null) }
     var deleteFileTarget by remember { mutableStateOf<DownloadedArtifact?>(null) }
     var deleteWorkflowTarget by remember { mutableStateOf<WorkflowArtifactGroup?>(null) }
     var parameterTarget by remember { mutableStateOf<WorkflowArtifactGroup?>(null) }
+    var prebuiltParameterTarget by remember { mutableStateOf<PrebuiltGkiRelease?>(null) }
     var deleteRemoteWorkflowRun by remember { mutableStateOf(false) }
     var showFlashConfirm by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
@@ -177,35 +178,23 @@ fun FlashScreen(vm: MainViewModel) {
     val selectedPrebuiltRelease = selectedPrebuiltReleaseId?.let { id ->
         state.prebuiltGkiReleases.firstOrNull { it.id == id }
     }
-    val contentMode = when {
-        selectedGroup != null -> FlashContentMode.WorkflowDetail
-        selectedPrebuiltRelease != null -> FlashContentMode.PrebuiltDetail
-        else -> FlashContentMode.TopList
-    }
 
     fun returnToWorkflowList() {
         selectedRunId = null
+        navController.popBackStack()
     }
 
     fun returnToPrebuiltReleaseList() {
         selectedPrebuiltReleaseId = null
+        navController.popBackStack()
     }
 
     fun returnToTopList() {
         selectedRunId = null
         selectedPrebuiltReleaseId = null
-    }
-
-    BackHandler(enabled = selectedRunId != null || selectedPrebuiltReleaseId != null) {
-        if (selectedRunId != null) returnToWorkflowList() else returnToPrebuiltReleaseList()
-    }
-    PredictiveBackHandler(
-        enabled = state.predictiveBackEnabled && (selectedRunId != null || selectedPrebuiltReleaseId != null)
-    ) { progress ->
-        try {
-            progress.collect { }
-            if (selectedRunId != null) returnToWorkflowList() else returnToPrebuiltReleaseList()
-        } catch (_: CancellationException) {
+        navController.navigate(FLASH_ROUTE_LIST) {
+            popUpTo(FLASH_ROUTE_LIST) { inclusive = false }
+            launchSingleTop = true
         }
     }
 
@@ -217,6 +206,10 @@ fun FlashScreen(vm: MainViewModel) {
         if (!state.prebuiltGkiEnabled) {
             activeContentTab = FlashContentTab.Workflows
             selectedPrebuiltReleaseId = null
+            navController.navigate(FLASH_ROUTE_LIST) {
+                popUpTo(FLASH_ROUTE_LIST) { inclusive = false }
+                launchSingleTop = true
+            }
         }
     }
 
@@ -226,19 +219,12 @@ fun FlashScreen(vm: MainViewModel) {
         }
     }
 
-    LaunchedEffect(selectedPrebuiltRelease?.id, state.prebuiltGkiEnabled, state.isLoggedIn) {
-        val release = selectedPrebuiltRelease
-        if (release != null && state.prebuiltGkiEnabled && state.isLoggedIn) {
-            vm.loadPrebuiltGkiAssets(release)
-        }
-    }
-
     LaunchedEffect(workflowGroups, selectedRunId) {
-        if (selectedRunId != null && selectedGroup == null) selectedRunId = null
+        if (selectedRunId != null && selectedGroup == null) returnToTopList()
     }
 
     LaunchedEffect(state.prebuiltGkiReleases, selectedPrebuiltReleaseId) {
-        if (selectedPrebuiltReleaseId != null && selectedPrebuiltRelease == null) selectedPrebuiltReleaseId = null
+        if (selectedPrebuiltReleaseId != null && selectedPrebuiltRelease == null) returnToTopList()
     }
 
     fun showFailure(title: String, lines: List<String>) {
@@ -414,7 +400,7 @@ fun FlashScreen(vm: MainViewModel) {
                         val targetRunId = group.runId
                         val shouldDeleteRemoteRun = deleteRemoteWorkflowRun
                         vm.deleteWorkflowArtifacts(targetRunId, shouldDeleteRemoteRun)
-                        if (selectedRunId == targetRunId) selectedRunId = null
+                        if (selectedRunId == targetRunId) returnToTopList()
                         deleteWorkflowTarget = null
                         deleteRemoteWorkflowRun = false
                     },
@@ -461,170 +447,170 @@ fun FlashScreen(vm: MainViewModel) {
         )
     }
 
-    val selectedPrebuiltAssets = selectedPrebuiltRelease?.let {
-        state.prebuiltGkiAssetsByReleaseId[it.id].orEmpty()
-    }.orEmpty()
-    val selectedPrebuiltAssetsLoading = selectedPrebuiltRelease?.id
-        ?.let { it in state.loadingPrebuiltGkiAssetReleaseIds } == true
-    var prebuiltFilter by remember(selectedPrebuiltRelease?.id) {
-        mutableStateOf(defaultPrebuiltFilter())
+    prebuiltParameterTarget?.let { release ->
+        PrebuiltParameterSummaryDialog(
+            release = release,
+            summary = remember(release.id, release.body) { parsePrebuiltGkiParameterSummary(release) },
+            onDismiss = { prebuiltParameterTarget = null }
+        )
     }
-    val filteredPrebuiltAssets = remember(selectedPrebuiltAssets, prebuiltFilter) {
-        val candidates = selectedPrebuiltAssets.filter(::isPrebuiltGkiCandidateUi)
-        if (prebuiltFilter.onlyMatches) {
-            candidates.filter { prebuiltAssetMatchesFilter(it, prebuiltFilter) }
-        } else {
-            candidates
-        }
+
+    val motionScheme = MaterialTheme.motionScheme
+    fun navEnter(forward: Boolean) = if (state.predictiveBackEnabled) {
+        fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+            slideInHorizontally(animationSpec = motionScheme.defaultSpatialSpec()) { width ->
+                if (forward) width / 3 else -width / 3
+            }
+    } else {
+        fadeIn(animationSpec = motionScheme.fastEffectsSpec())
     }
-    val recommendedPrebuiltIds = remember(filteredPrebuiltAssets, state.recommendedBuildConfig) {
-        recommendedPrebuiltAssetIdsForUi(filteredPrebuiltAssets, state.recommendedBuildConfig)
+    fun navExit(forward: Boolean) = if (state.predictiveBackEnabled) {
+        fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+            slideOutHorizontally(animationSpec = motionScheme.fastSpatialSpec()) { width ->
+                if (forward) -width / 3 else width / 3
+            }
+    } else {
+        fadeOut(animationSpec = motionScheme.fastEffectsSpec())
     }
 
     Scaffold(
         containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
         topBar = { ExpressiveTopBar(title = if (rootGranted) stringResource(R.string.flash_title) else "文件") }
     ) { padding ->
-        AnimatedContent(
-            targetState = contentMode,
-            transitionSpec = {
-                val forward = targetState.depth >= initialState.depth
-                val enterOffset: (Int) -> Int = { if (forward) it / 3 else -it / 3 }
-                val exitOffset: (Int) -> Int = { if (forward) -it / 3 else it / 3 }
-                (slideInHorizontally(initialOffsetX = enterOffset) + fadeIn()) togetherWith
-                    (slideOutHorizontally(targetOffsetX = exitOffset) + fadeOut())
-            },
-            label = "flash-content"
-        ) { mode ->
-            LazyColumn(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 96.dp)
-            ) {
-                when (mode) {
-                    FlashContentMode.WorkflowDetail -> {
-                        val group = selectedGroup
-                        if (group != null) {
+        NavHost(
+            navController = navController,
+            startDestination = FLASH_ROUTE_LIST,
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
+            enterTransition = { navEnter(forward = true) },
+            exitTransition = { navExit(forward = true) },
+            popEnterTransition = { navEnter(forward = false) },
+            popExitTransition = { navExit(forward = false) }
+        ) {
+            composable(FLASH_ROUTE_LIST) {
+                LaunchedEffect(Unit) {
+                    selectedRunId = null
+                    selectedPrebuiltReleaseId = null
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 96.dp)
+                ) {
+                    item {
+                        FlashHero(
+                            buildStatus = state.buildStatus,
+                            availableCount = remoteArtifacts.size,
+                            downloadedCount = workflowDownloadedArtifacts.size,
+                            rootGranted = rootGranted
+                        )
+                    }
+
+                    if (state.prebuiltGkiEnabled) {
+                        item {
+                            FlashContentTabs(
+                                active = activeContentTab,
+                                onSelect = { activeContentTab = it }
+                            )
+                        }
+                    }
+
+                    when (currentContentTab) {
+                        FlashContentTab.Workflows -> {
                             item {
-                                WorkflowDetailHeader(
-                                    group = group,
-                                    onBack = ::returnToWorkflowList,
-                                    onShowParameters = { parameterTarget = group },
-                                    onDelete = {
-                                        deleteWorkflowTarget = group
-                                        deleteRemoteWorkflowRun = false
-                                    }
-                                )
+                                OutlinedButton(
+                                    onClick = { vm.loadRecentRuns() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(17.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("联网刷新构建产物")
+                                }
                             }
 
-                            artifactCategoryOrder.forEach { category ->
-                                val remoteInCategory = group.remote.filter {
-                                    DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) == category
-                                }
-                                val matchedLocalPaths = remoteInCategory
-                                    .flatMap { source -> group.local.filter { DownloadUtils.matchesDownloadedArtifact(it, source) } }
-                                    .map { it.filePath }
-                                    .toSet()
-                                val localOnly = group.local
-                                    .filter { it.category == category && it.filePath !in matchedLocalPaths }
-
-                                if (remoteInCategory.isNotEmpty() || localOnly.isNotEmpty()) {
-                                    item("category-${group.runId}-${category.name}") {
-                                        CategoryHeader(category)
-                                    }
-                                }
-
-                                items(remoteInCategory, key = { "source-${it.id}" }) { artifact ->
-                                    ArtifactSourceCard(
-                                        artifact = artifact,
-                                        downloadedFiles = group.local.filter {
-                                            DownloadUtils.matchesDownloadedArtifact(it, artifact)
+                            if (workflowGroups.isNotEmpty()) {
+                                items(workflowGroups, key = { "workflow-${it.runId}" }) { group ->
+                                    WorkflowRunCard(
+                                        group = group,
+                                        onClick = {
+                                            selectedRunId = group.runId
+                                            selectedPrebuiltReleaseId = null
+                                            navController.navigate(flashWorkflowRoute(group.runId))
                                         },
-                                        progress = state.downloadProgress[artifact.id],
-                                        autoDownloadEligible = state.autoDownload &&
-                                            state.pendingAutoDownloadRunId == artifact.runId &&
-                                            DownloadUtils.shouldAutoDownload(artifact),
-                                        onDownload = { vm.downloadArtifact(artifact) },
-                                        onCopyPath = ::copyDownloadedFilePath,
-                                        onInstall = ::installManager,
-                                        onFlash = {
-                                            selectedItem = it
-                                            showFlashConfirm = true
-                                        },
-                                        onDelete = { deleteFileTarget = it },
-                                        allowRootActions = rootGranted
+                                        onShowParameters = { parameterTarget = group },
+                                        onDelete = {
+                                            deleteWorkflowTarget = group
+                                            deleteRemoteWorkflowRun = false
+                                        }
                                     )
                                 }
-
-                                items(localOnly, key = { "local-${it.filePath}" }) { artifact ->
-                                    LocalOnlyArtifactCard(
-                                        artifact = artifact,
-                                        onCopyPath = ::copyDownloadedFilePath,
-                                        onInstall = ::installManager,
-                                        onFlash = {
-                                            selectedItem = it
-                                            showFlashConfirm = true
+                            } else {
+                                item {
+                                    ExpressiveEmptyState(
+                                        title = if (rootGranted) "暂无可刷写产物" else "暂无可查看文件",
+                                        subtitle = if (rootGranted) {
+                                            "构建成功后，ABK 会联网同步并按工作流整理产物。"
+                                        } else {
+                                            "构建成功后，可在这里下载并查看产物文件。"
                                         },
-                                        onDelete = { deleteFileTarget = it },
-                                        allowRootActions = rootGranted
+                                        icon = Icons.Default.Inbox
                                     )
                                 }
                             }
                         }
-                    }
 
-                    FlashContentMode.PrebuiltDetail -> {
-                        val release = selectedPrebuiltRelease
-                        if (release != null) {
-                            item {
-                                PrebuiltReleaseDetailHeader(
-                                    release = release,
-                                    sourceCount = selectedPrebuiltAssets.size,
-                                    visibleCount = filteredPrebuiltAssets.size,
-                                    onBack = ::returnToPrebuiltReleaseList,
-                                    onRefresh = { vm.loadPrebuiltGkiAssets(release, force = true) }
-                                )
-                            }
+                        FlashContentTab.PrebuiltGki -> {
+                            if (state.prebuiltGkiEnabled) {
+                                item {
+                                    PrebuiltReleaseListHeader(
+                                        releaseCount = state.prebuiltGkiReleases.size,
+                                        isLoading = state.isLoadingPrebuiltGkiReleases,
+                                        onRefresh = { vm.loadPrebuiltGkiReleases(force = true) }
+                                    )
+                                }
 
-                            item {
-                                PrebuiltGkiFilterCard(
-                                    filter = prebuiltFilter,
-                                    onFilterChange = { prebuiltFilter = it }
-                                )
-                            }
-
-                            when {
-                                selectedPrebuiltAssetsLoading -> {
-                                    item {
-                                        LoadingRow("正在获取 ${release.name} 的预编译 GKI")
+                                when {
+                                    state.isLoadingPrebuiltGkiReleases -> {
+                                        item {
+                                            LoadingRow("正在获取 Release")
+                                        }
+                                    }
+                                    state.prebuiltGkiReleases.isEmpty() -> {
+                                        item {
+                                            ExpressiveEmptyState(
+                                                title = "暂无预编译 GKI Release",
+                                                subtitle = "本仓库 Release 中暂未发现可浏览的版本。",
+                                                icon = Icons.Default.CloudDownload
+                                            )
+                                        }
+                                    }
+                                    else -> {
+                                        items(state.prebuiltGkiReleases, key = { "release-${it.id}" }) { release ->
+                                            PrebuiltReleaseCard(
+                                                release = release,
+                                                onClick = {
+                                                    selectedPrebuiltReleaseId = release.id
+                                                    selectedRunId = null
+                                                    navController.navigate(flashPrebuiltRoute(release.id))
+                                                }
+                                            )
+                                        }
                                     }
                                 }
-                                filteredPrebuiltAssets.isEmpty() -> {
-                                    item {
-                                        ExpressiveEmptyState(
-                                            title = "未找到匹配资产",
-                                            subtitle = if (prebuiltFilter.onlyMatches) {
-                                                "当前 release 没有匹配筛选条件的 GKI、boot、img 或 AK3 资产。"
-                                            } else {
-                                                "当前 release 没有可识别的预编译 GKI 资产。"
-                                            },
-                                            icon = Icons.Default.Inbox
-                                        )
-                                    }
+
+                                val localPrebuiltFiles = state.downloadedArtifacts.filter {
+                                    it.runId == PREBUILT_GKI_RUN_ID
                                 }
-                                else -> {
-                                    items(filteredPrebuiltAssets, key = { "prebuilt-${it.id}" }) { asset ->
-                                        PrebuiltGkiAssetCard(
-                                            asset = asset,
-                                            recommended = asset.id in recommendedPrebuiltIds,
-                                            downloadedFiles = state.downloadedArtifacts.filter {
-                                                DownloadUtils.matchesDownloadedPrebuilt(it, asset)
-                                            },
-                                            progress = state.downloadProgress[DownloadUtils.prebuiltProgressKey(asset.id)],
-                                            onDownload = { vm.downloadPrebuiltGki(asset) },
+                                if (localPrebuiltFiles.isNotEmpty()) {
+                                    item {
+                                        CategoryHeader(ArtifactCategory.KERNEL)
+                                    }
+                                    items(localPrebuiltFiles, key = { "prebuilt-local-${it.filePath}" }) { artifact ->
+                                        LocalOnlyArtifactCard(
+                                            artifact = artifact,
                                             onCopyPath = ::copyDownloadedFilePath,
                                             onInstall = ::installManager,
                                             onFlash = {
@@ -639,114 +625,191 @@ fun FlashScreen(vm: MainViewModel) {
                             }
                         }
                     }
-
-                    FlashContentMode.TopList -> {
-                item {
-                    FlashHero(
-                        buildStatus = state.buildStatus,
-                        availableCount = remoteArtifacts.size,
-                        downloadedCount = workflowDownloadedArtifacts.size,
-                        rootGranted = rootGranted
-                    )
                 }
-
-                if (state.prebuiltGkiEnabled) {
-                    item {
-                        FlashContentTabs(
-                            active = activeContentTab,
-                            onSelect = {
-                                activeContentTab = it
-                                returnToTopList()
-                            }
-                        )
-                    }
+            }
+            composable(
+                route = FLASH_ROUTE_WORKFLOW,
+                arguments = listOf(navArgument(FLASH_ARG_RUN_ID) { type = NavType.LongType })
+            ) { entry ->
+                val routeRunId = entry.arguments?.getLong(FLASH_ARG_RUN_ID) ?: return@composable
+                val group = workflowGroups.firstOrNull { it.runId == routeRunId }
+                LaunchedEffect(routeRunId) {
+                    selectedRunId = routeRunId
+                    selectedPrebuiltReleaseId = null
                 }
-
-                when (currentContentTab) {
-                    FlashContentTab.Workflows -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 96.dp)
+                ) {
+                    if (group != null) {
                         item {
-                            OutlinedButton(
-                                onClick = { vm.loadRecentRuns() },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(17.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("联网刷新构建产物")
-                            }
+                            WorkflowDetailHeader(
+                                group = group,
+                                onBack = ::returnToWorkflowList,
+                                onShowParameters = { parameterTarget = group },
+                                onDelete = {
+                                    deleteWorkflowTarget = group
+                                    deleteRemoteWorkflowRun = false
+                                }
+                            )
                         }
 
-                        if (workflowGroups.isNotEmpty()) {
-                            items(workflowGroups, key = { "workflow-${it.runId}" }) { group ->
-                                WorkflowRunCard(
-                                    group = group,
-                                    onClick = { selectedRunId = group.runId },
-                                    onShowParameters = { parameterTarget = group },
-                                    onDelete = {
-                                        deleteWorkflowTarget = group
-                                        deleteRemoteWorkflowRun = false
-                                    }
-                                )
+                        artifactCategoryOrder.forEach { category ->
+                            val remoteInCategory = group.remote.filter {
+                                DownloadUtils.classifyCategory(DownloadUtils.classifyArtifact(it.name)) == category
                             }
-                        } else {
-                            item {
-                                ExpressiveEmptyState(
-                                    title = if (rootGranted) "暂无可刷写产物" else "暂无可查看文件",
-                                    subtitle = if (rootGranted) {
-                                        "构建成功后，ABK 会联网同步并按工作流整理产物。"
-                                    } else {
-                                        "构建成功后，可在这里下载并查看产物文件。"
+                            val matchedLocalPaths = remoteInCategory
+                                .flatMap { source -> group.local.filter { DownloadUtils.matchesDownloadedArtifact(it, source) } }
+                                .map { it.filePath }
+                                .toSet()
+                            val localOnly = group.local
+                                .filter { it.category == category && it.filePath !in matchedLocalPaths }
+
+                            if (remoteInCategory.isNotEmpty() || localOnly.isNotEmpty()) {
+                                item("category-${group.runId}-${category.name}") {
+                                    CategoryHeader(category)
+                                }
+                            }
+
+                            items(remoteInCategory, key = { "source-${it.id}" }) { artifact ->
+                                ArtifactSourceCard(
+                                    artifact = artifact,
+                                    downloadedFiles = group.local.filter {
+                                        DownloadUtils.matchesDownloadedArtifact(it, artifact)
                                     },
-                                    icon = Icons.Default.Inbox
+                                    progress = state.downloadProgress[artifact.id],
+                                    autoDownloadEligible = state.autoDownload &&
+                                        state.pendingAutoDownloadRunId == artifact.runId &&
+                                        DownloadUtils.shouldAutoDownload(artifact),
+                                    onDownload = { vm.downloadArtifact(artifact) },
+                                    onCopyPath = ::copyDownloadedFilePath,
+                                    onInstall = ::installManager,
+                                    onFlash = {
+                                        selectedItem = it
+                                        showFlashConfirm = true
+                                    },
+                                    onDelete = { deleteFileTarget = it },
+                                    allowRootActions = rootGranted
                                 )
                             }
+
+                            items(localOnly, key = { "local-${it.filePath}" }) { artifact ->
+                                LocalOnlyArtifactCard(
+                                    artifact = artifact,
+                                    onCopyPath = ::copyDownloadedFilePath,
+                                    onInstall = ::installManager,
+                                    onFlash = {
+                                        selectedItem = it
+                                        showFlashConfirm = true
+                                    },
+                                    onDelete = { deleteFileTarget = it },
+                                    allowRootActions = rootGranted
+                                )
+                            }
+                        }
+                    } else {
+                        item {
+                            ExpressiveEmptyState(
+                                title = "工作流记录不可用",
+                                subtitle = "该工作流产物已被刷新或删除。",
+                                icon = Icons.Default.Inbox
+                            )
                         }
                     }
+                }
+            }
+            composable(
+                route = FLASH_ROUTE_PREBUILT,
+                arguments = listOf(navArgument(FLASH_ARG_RELEASE_ID) { type = NavType.LongType })
+            ) { entry ->
+                val releaseId = entry.arguments?.getLong(FLASH_ARG_RELEASE_ID) ?: return@composable
+                val release = state.prebuiltGkiReleases.firstOrNull { it.id == releaseId }
+                val selectedPrebuiltAssets = release?.let {
+                    state.prebuiltGkiAssetsByReleaseId[it.id].orEmpty()
+                }.orEmpty()
+                val selectedPrebuiltAssetsLoading = release?.id
+                    ?.let { it in state.loadingPrebuiltGkiAssetReleaseIds } == true
+                var prebuiltFilter by remember(release?.id) {
+                    mutableStateOf(defaultPrebuiltFilter())
+                }
+                val filteredPrebuiltAssets = remember(selectedPrebuiltAssets, prebuiltFilter) {
+                    val candidates = selectedPrebuiltAssets.filter(::isPrebuiltGkiCandidateUi)
+                    if (prebuiltFilter.onlyMatches) {
+                        candidates.filter { prebuiltAssetMatchesFilter(it, prebuiltFilter) }
+                    } else {
+                        candidates
+                    }
+                }
+                val recommendedPrebuiltIds = remember(filteredPrebuiltAssets, state.recommendedBuildConfig) {
+                    recommendedPrebuiltAssetIdsForUi(filteredPrebuiltAssets, state.recommendedBuildConfig)
+                }
+                LaunchedEffect(releaseId) {
+                    selectedPrebuiltReleaseId = releaseId
+                    selectedRunId = null
+                }
+                LaunchedEffect(release?.id, state.prebuiltGkiEnabled, state.isLoggedIn) {
+                    if (release != null && state.prebuiltGkiEnabled && state.isLoggedIn) {
+                        vm.loadPrebuiltGkiAssets(release)
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 96.dp)
+                ) {
+                    if (release != null) {
+                        item {
+                            PrebuiltReleaseDetailHeader(
+                                release = release,
+                                sourceCount = selectedPrebuiltAssets.size,
+                                visibleCount = filteredPrebuiltAssets.size,
+                                onBack = ::returnToPrebuiltReleaseList,
+                                onShowParameters = { prebuiltParameterTarget = release },
+                                onRefresh = { vm.loadPrebuiltGkiAssets(release, force = true) }
+                            )
+                        }
 
-                    FlashContentTab.PrebuiltGki -> {
-                        if (state.prebuiltGkiEnabled) {
-                            item {
-                                PrebuiltReleaseListHeader(
-                                    releaseCount = state.prebuiltGkiReleases.size,
-                                    isLoading = state.isLoadingPrebuiltGkiReleases,
-                                    onRefresh = { vm.loadPrebuiltGkiReleases(force = true) }
-                                )
-                            }
+                        item {
+                            PrebuiltGkiFilterCard(
+                                filter = prebuiltFilter,
+                                onFilterChange = { prebuiltFilter = it }
+                            )
+                        }
 
-                            when {
-                                state.isLoadingPrebuiltGkiReleases -> {
-                                    item {
-                                        LoadingRow("正在获取 Release")
-                                    }
-                                }
-                                state.prebuiltGkiReleases.isEmpty() -> {
-                                    item {
-                                        ExpressiveEmptyState(
-                                            title = "暂无预编译 GKI Release",
-                                            subtitle = "本仓库 Release 中暂未发现可浏览的版本。",
-                                            icon = Icons.Default.CloudDownload
-                                        )
-                                    }
-                                }
-                                else -> {
-                                    items(state.prebuiltGkiReleases, key = { "release-${it.id}" }) { release ->
-                                        PrebuiltReleaseCard(
-                                            release = release,
-                                            onClick = { selectedPrebuiltReleaseId = release.id }
-                                        )
-                                    }
-                                }
-                            }
-
-                            val localPrebuiltFiles = state.downloadedArtifacts.filter {
-                                it.runId == PREBUILT_GKI_RUN_ID
-                            }
-                            if (localPrebuiltFiles.isNotEmpty()) {
+                        when {
+                            selectedPrebuiltAssetsLoading -> {
                                 item {
-                                    CategoryHeader(ArtifactCategory.KERNEL)
+                                    LoadingRow("正在获取 ${release.name} 的预编译 GKI")
                                 }
-                                items(localPrebuiltFiles, key = { "prebuilt-local-${it.filePath}" }) { artifact ->
-                                    LocalOnlyArtifactCard(
-                                        artifact = artifact,
+                            }
+                            filteredPrebuiltAssets.isEmpty() -> {
+                                item {
+                                    ExpressiveEmptyState(
+                                        title = "未找到匹配资产",
+                                        subtitle = if (prebuiltFilter.onlyMatches) {
+                                            "当前 release 没有匹配筛选条件的 GKI、boot、img 或 AK3 资产。"
+                                        } else {
+                                            "当前 release 没有可识别的预编译 GKI 资产。"
+                                        },
+                                        icon = Icons.Default.Inbox
+                                    )
+                                }
+                            }
+                            else -> {
+                                items(filteredPrebuiltAssets, key = { "prebuilt-${it.id}" }) { asset ->
+                                    PrebuiltGkiAssetCard(
+                                        asset = asset,
+                                        recommended = asset.id in recommendedPrebuiltIds,
+                                        downloadedFiles = state.downloadedArtifacts.filter {
+                                            DownloadUtils.matchesDownloadedPrebuilt(it, asset)
+                                        },
+                                        progress = state.downloadProgress[DownloadUtils.prebuiltProgressKey(asset.id)],
+                                        onDownload = { vm.downloadPrebuiltGki(asset) },
                                         onCopyPath = ::copyDownloadedFilePath,
                                         onInstall = ::installManager,
                                         onFlash = {
@@ -759,11 +822,17 @@ fun FlashScreen(vm: MainViewModel) {
                                 }
                             }
                         }
+                    } else {
+                        item {
+                            ExpressiveEmptyState(
+                                title = "Release 不可用",
+                                subtitle = "该预编译 GKI Release 已被刷新或删除。",
+                                icon = Icons.Default.CloudDownload
+                            )
+                        }
                     }
                 }
-                }
             }
-        }
         }
     }
 }
@@ -844,33 +913,7 @@ private fun BuildParameterSummaryDialog(
                 }
                 when {
                     summary != null -> {
-                        ParameterSection("版本参数") {
-                            ParameterRow("Android 版本", summary.androidVersion)
-                            ParameterRow("内核版本", summary.kernelVersion)
-                            ParameterRow("子版本号", summary.subLevel)
-                            ParameterRow("补丁级别", summary.osPatchLevel)
-                            ParameterRow("构建时间", summary.buildTime)
-                        }
-                        ParameterSection("KernelSU") {
-                            ParameterRow("KSU 变体", summary.ksuVariant)
-                            ParameterRow("KSU 分支", summary.ksuBranch)
-                            ParameterRow("SUSFS 状态", summary.susfsEnabled)
-                        }
-                        ParameterSection("补丁与功能") {
-                            ParameterRow("ZRAM 增强", summary.zramEnabled)
-                            ParameterRow("ZRAM 完整算法", summary.zramFullAlgo)
-                            ParameterRow("ZRAM 额外算法", summary.zramExtraAlgos)
-                            ParameterRow("BBG 补丁", summary.bbgEnabled)
-                            ParameterRow("DDK LSM", summary.ddkLsm)
-                            ParameterRow("NTsync 补丁", summary.ntsyncEnabled)
-                            ParameterRow("Networking 增强", summary.networkingEnabled)
-                            ParameterRow("KPM 功能", summary.kpmEnabled)
-                            ParameterRow("KPM 密码", summary.kpmPassword)
-                            ParameterRow("Re-Kernel", summary.reKernelEnabled)
-                            ParameterRow("虚拟化支持", summary.virtualizationSupport)
-                            ParameterRow("自定义注入", summary.customInjection)
-                            ParameterRow("Stock Config", summary.stockConfig)
-                        }
+                        ParameterSummarySections(summary)
                     }
                     loading -> {
                         Row(
@@ -907,6 +950,86 @@ private fun BuildParameterSummaryDialog(
             null
         }
     )
+}
+
+@Composable
+private fun PrebuiltParameterSummaryDialog(
+    release: PrebuiltGkiRelease,
+    summary: BuildParameterSummary?,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+        title = { Text("参数详情") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ParameterSection("Release") {
+                    ParameterRow("名称", release.name)
+                    ParameterRow("Tag", release.tagName)
+                    ParameterRow("发布时间", releaseDateLabel(release.publishedAt))
+                    ParameterRow("资产", if (release.assetCount > 0) "${release.assetCount} 个资产" else "未知")
+                }
+                if (summary != null) {
+                    ParameterSummarySections(summary)
+                } else {
+                    Text(
+                        text = "Release 内容中没有可解析的参数矩阵",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
+}
+
+@Composable
+private fun ParameterSummarySections(summary: BuildParameterSummary) {
+    ParameterSection("版本参数") {
+        ParameterRow("Android 版本", summary.androidVersion)
+        ParameterRow("内核版本", summary.kernelVersion)
+        ParameterRow("子版本号", summary.subLevel)
+        ParameterRow("补丁级别", summary.osPatchLevel)
+        ParameterRow("构建时间", summary.buildTime)
+    }
+    ParameterSection("KernelSU") {
+        ParameterRow("KSU 变体", summary.ksuVariant)
+        ParameterRow("KSU 分支", summary.ksuBranch)
+        ParameterRow("SUSFS 状态", summary.susfsEnabled)
+    }
+    ParameterSection("补丁与功能") {
+        ParameterRow("ZRAM 增强", summary.zramEnabled)
+        ParameterRow("ZRAM 完整算法", summary.zramFullAlgo)
+        ParameterRow("ZRAM 额外算法", summary.zramExtraAlgos)
+        ParameterRow("BBG 补丁", summary.bbgEnabled)
+        ParameterRow("DDK LSM", summary.ddkLsm)
+        ParameterRow("NTsync 补丁", summary.ntsyncEnabled)
+        ParameterRow("网络增强", summary.networkingEnabled)
+        ParameterRow("KPM 功能", summary.kpmEnabled)
+        ParameterRow("KPM 密码", summary.kpmPassword)
+        ParameterRow("Re-Kernel", summary.reKernelEnabled)
+        ParameterRow("虚拟化支持", summary.virtualizationSupport)
+        ParameterRow("自定义注入", summary.customInjection)
+        ParameterRow("Stock Config", summary.stockConfig)
+    }
+    val extraRows = summary.extraRows.orEmpty()
+    if (extraRows.isNotEmpty()) {
+        ParameterSection("额外信息") {
+            extraRows.forEach { (label, value) ->
+                ParameterRow(label, value)
+            }
+        }
+    }
 }
 
 @Composable
@@ -958,6 +1081,202 @@ private fun parameterDisplayValue(value: String): String {
         else -> trimmed
     }
 }
+
+private fun parsePrebuiltGkiParameterSummary(release: PrebuiltGkiRelease): BuildParameterSummary? {
+    val values = linkedMapOf<String, String>()
+    val extraRows = linkedMapOf<String, String>()
+    parseReleaseBodyParameterRows(release.body).forEach { (label, rawValue) ->
+        val value = rawValue.trim()
+        val key = normalizeReleaseParameterLabel(label)
+        if (key != null) {
+            values[key] = sanitizeReleaseParameterValue(key, value)
+        } else if (isReleaseExtraParameterLabel(label)) {
+            extraRows[label.trim()] = value.ifBlank { "无" }
+        }
+    }
+    if (values.isEmpty() && extraRows.isEmpty()) return null
+
+    val inferredVersion = inferPrebuiltVersionFields(release)
+    return BuildParameterSummary(
+        runId = -release.id,
+        runNumber = 0,
+        runTitle = release.name,
+        runCreatedAt = release.publishedAt,
+        runHtmlUrl = release.htmlUrl,
+        androidVersion = values["androidVersion"].orEmpty().ifBlank { inferredVersion.androidVersion },
+        kernelVersion = values["kernelVersion"].orEmpty().ifBlank { inferredVersion.kernelVersion },
+        subLevel = values["subLevel"].orEmpty().ifBlank { inferredVersion.subLevel },
+        osPatchLevel = values["osPatchLevel"].orEmpty(),
+        ksuVariant = values["ksuVariant"].orEmpty(),
+        ksuBranch = values["ksuBranch"].orEmpty(),
+        buildTime = values["buildTime"].orEmpty(),
+        susfsEnabled = values["susfsEnabled"].orEmpty(),
+        zramEnabled = values["zramEnabled"].orEmpty(),
+        zramFullAlgo = values["zramFullAlgo"].orEmpty(),
+        zramExtraAlgos = values["zramExtraAlgos"].orEmpty(),
+        bbgEnabled = values["bbgEnabled"].orEmpty(),
+        ddkLsm = values["ddkLsm"].orEmpty(),
+        ntsyncEnabled = values["ntsyncEnabled"].orEmpty(),
+        networkingEnabled = values["networkingEnabled"].orEmpty(),
+        kpmEnabled = values["kpmEnabled"].orEmpty(),
+        kpmPassword = values["kpmPassword"].orEmpty(),
+        reKernelEnabled = values["reKernelEnabled"].orEmpty(),
+        virtualizationSupport = values["virtualizationSupport"].orEmpty(),
+        customInjection = values["customInjection"].orEmpty(),
+        stockConfig = values["stockConfig"].orEmpty(),
+        source = "release_body",
+        extraRows = extraRows
+    )
+}
+
+private fun parseReleaseBodyParameterRows(body: String): List<Pair<String, String>> {
+    if (body.isBlank()) return emptyList()
+    return body.lineSequence()
+        .mapNotNull(::parseReleaseBodyParameterRow)
+        .filterNot { (label, value) ->
+            val normalized = label.replace(Regex("\\s+"), "")
+            normalized == "项目" && value.replace(Regex("\\s+"), "") == "内容"
+        }
+        .toList()
+}
+
+private fun parseReleaseBodyParameterRow(line: String): Pair<String, String>? {
+    val trimmed = line.trim()
+    if (trimmed.isBlank()) return null
+    if (trimmed.startsWith("|")) {
+        val cells = trimmed.trim('|')
+            .split('|')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (cells.size >= 2 && !cells[0].all { it == '-' || it == ':' }) {
+            return cells[0] to cells.drop(1).joinToString(" | ")
+        }
+    }
+    val separated = trimmed.split(Regex("\\t+| {2,}"), limit = 2)
+    if (separated.size == 2) return separated[0].trim() to separated[1].trim()
+    val colonIndex = listOf(trimmed.indexOf(':'), trimmed.indexOf('：'))
+        .filter { it >= 0 }
+        .minOrNull()
+    if (colonIndex != null) {
+        return trimmed.substring(0, colonIndex).trim() to trimmed.substring(colonIndex + 1).trim()
+    }
+    return RELEASE_PARAMETER_LABELS.firstOrNull { trimmed.startsWith(it) }?.let { label ->
+        label to trimmed.removePrefix(label).trim().trimStart(':', '：').trim()
+    }
+}
+
+private fun normalizeReleaseParameterLabel(label: String): String? {
+    val compact = label.replace(Regex("\\s+"), "").lowercase()
+    return when {
+        compact.contains("android版本") -> "androidVersion"
+        compact.contains("内核版本") -> "kernelVersion"
+        compact.contains("子版本号") -> "subLevel"
+        compact.contains("补丁级别") -> "osPatchLevel"
+        compact.contains("ksu变体") -> "ksuVariant"
+        compact.contains("ksu分支") -> "ksuBranch"
+        compact.contains("构建时间") -> "buildTime"
+        compact.contains("susfs状态") -> "susfsEnabled"
+        compact.contains("zram增强") -> "zramEnabled"
+        compact.contains("zram完整算法") -> "zramFullAlgo"
+        compact.contains("zram额外算法") -> "zramExtraAlgos"
+        compact.contains("bbg补丁") -> "bbgEnabled"
+        compact.contains("ddklsm") -> "ddkLsm"
+        compact.contains("ntsync补丁") -> "ntsyncEnabled"
+        compact.contains("网络增强") || compact.contains("networking增强") || compact.contains("networing增强") -> "networkingEnabled"
+        compact.contains("kpm功能") -> "kpmEnabled"
+        compact.contains("kpm密码") -> "kpmPassword"
+        compact.contains("re-kernel") || compact.contains("rekernel") -> "reKernelEnabled"
+        compact.contains("虚拟化支持") -> "virtualizationSupport"
+        compact == "自定义注入" -> "customInjection"
+        compact.contains("stockconfig") -> "stockConfig"
+        else -> null
+    }
+}
+
+private fun sanitizeReleaseParameterValue(key: String, value: String): String {
+    if (key != "kpmPassword") return value.ifBlank { "无" }
+    val normalized = value.trim().lowercase()
+    return when {
+        normalized.isBlank() -> "默认"
+        normalized in setOf("默认", "default", "无", "none", "not set") -> "默认"
+        else -> "已设置"
+    }
+}
+
+private fun isReleaseExtraParameterLabel(label: String): Boolean {
+    val compact = label.replace(Regex("\\s+"), "").lowercase()
+    return RELEASE_EXTRA_PARAMETER_LABELS.any { compact == it }
+}
+
+private fun inferPrebuiltVersionFields(release: PrebuiltGkiRelease): PrebuiltVersionFields {
+    val source = "${release.name}\n${release.tagName}\n${release.body}"
+    val androidKernel = Regex("android\\s*(\\d+)\\s*/\\s*(\\d+\\.\\d+)(?:\\.(\\d+))?", RegexOption.IGNORE_CASE)
+        .find(source)
+    if (androidKernel != null) {
+        return PrebuiltVersionFields(
+            androidVersion = "android${androidKernel.groupValues[1]}",
+            kernelVersion = androidKernel.groupValues[2],
+            subLevel = androidKernel.groupValues.getOrNull(3).orEmpty()
+        )
+    }
+    val android = Regex("android\\s*(\\d+)", RegexOption.IGNORE_CASE)
+        .find(source)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.let { "android$it" }
+        .orEmpty()
+    return PrebuiltVersionFields(androidVersion = android)
+}
+
+private data class PrebuiltVersionFields(
+    val androidVersion: String = "",
+    val kernelVersion: String = "",
+    val subLevel: String = ""
+)
+
+private val RELEASE_PARAMETER_LABELS = listOf(
+    "自定义注入参数列表",
+    "网络增强 (IPSet + BBR)",
+    "Release asset 数",
+    "5.10 修订版本",
+    "自定义版本名",
+    "一加 8E 支持",
+    "Android 版本",
+    "Stock Config",
+    "ZRAM 完整算法",
+    "ZRAM 额外算法",
+    "NTsync 补丁",
+    "虚拟化支持",
+    "自定义注入",
+    "内核版本",
+    "子版本号",
+    "补丁级别",
+    "KSU 变体",
+    "KSU 分支",
+    "构建时间",
+    "SUSFS 状态",
+    "ZRAM 增强",
+    "BBG 补丁",
+    "DDK LSM",
+    "网络增强",
+    "KPM 功能",
+    "KPM 密码",
+    "Re-Kernel",
+    "Artifact 数",
+    "源 commit",
+    "源 run"
+).sortedByDescending { it.length }
+
+private val RELEASE_EXTRA_PARAMETER_LABELS = setOf(
+    "源run",
+    "源commit",
+    "artifact数",
+    "releaseasset数",
+    "自定义版本名",
+    "5.10修订版本",
+    "一加8e支持",
+    "自定义注入参数列表"
+)
 
 @Composable
 private fun FlashContentTabs(
@@ -1062,6 +1381,7 @@ private fun PrebuiltReleaseDetailHeader(
     sourceCount: Int,
     visibleCount: Int,
     onBack: () -> Unit,
+    onShowParameters: () -> Unit,
     onRefresh: () -> Unit
 ) {
     ExpressiveSectionCard(
@@ -1079,6 +1399,9 @@ private fun PrebuiltReleaseDetailHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = onShowParameters) {
+                Icon(Icons.Default.Tune, contentDescription = "参数详情")
+            }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "刷新资产")
             }
@@ -1775,11 +2098,15 @@ private fun flashCommandPreview(item: DownloadedArtifact) = when (item.type) {
     else -> "run ${item.name}"
 }
 
-private enum class FlashContentMode(val depth: Int) {
-    TopList(0),
-    WorkflowDetail(1),
-    PrebuiltDetail(1)
-}
+private const val FLASH_ROUTE_LIST = "flash_list"
+private const val FLASH_ARG_RUN_ID = "runId"
+private const val FLASH_ARG_RELEASE_ID = "releaseId"
+private const val FLASH_ROUTE_WORKFLOW = "workflow/{$FLASH_ARG_RUN_ID}"
+private const val FLASH_ROUTE_PREBUILT = "prebuilt/{$FLASH_ARG_RELEASE_ID}"
+
+private fun flashWorkflowRoute(runId: Long) = "workflow/$runId"
+
+private fun flashPrebuiltRoute(releaseId: Long) = "prebuilt/$releaseId"
 
 private enum class FlashContentTab(val label: String) {
     Workflows("构建产物"),
