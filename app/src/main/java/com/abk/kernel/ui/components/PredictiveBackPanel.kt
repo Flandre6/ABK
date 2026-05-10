@@ -42,7 +42,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,8 +120,7 @@ fun BoxScope.PredictiveBackPanel(
                 .pointerInput(dismissEnabled, predictiveBackEnabled) {
                     if (dismissEnabled && predictiveBackEnabled) {
                         detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
+                            onHorizontalDrag = { _, dragAmount ->
                                 val width = size.width.toFloat().coerceAtLeast(1f)
                                 val next = (openness.value - dragAmount / width).coerceIn(0f, 1f)
                                 scope.launch { openness.snapTo(next) }
