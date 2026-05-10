@@ -7,7 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -18,8 +18,9 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -29,7 +30,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +62,17 @@ import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.pow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+
+private const val BUILD_PLAN_BACK_VISUAL_EXPONENT = 1.8f
+private const val BUILD_PLAN_BACK_SCALE_DELTA = 0.09f
+private const val BUILD_PLAN_BACK_SCRIM_ALPHA = 0.32f
+private const val BUILD_PLAN_PAGE_EXIT_DELAY_MS = 280L
+private val BUILD_PLAN_BACK_MAX_OFFSET = 56.dp
+private val BUILD_PLAN_BACK_MAX_CORNER = 32.dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -94,6 +109,18 @@ fun BuildScreen(
     var showImportPlanDialog by remember { mutableStateOf(false) }
     var showPlanLibraryPage by rememberSaveable { mutableStateOf(false) }
     var planToolsExpanded by rememberSaveable { mutableStateOf(false) }
+    var planBackProgress by remember { mutableFloatStateOf(0f) }
+    val animatedPlanBackProgress by animateFloatAsState(
+        targetValue = planBackProgress.coerceIn(0f, 1f),
+        animationSpec = motionScheme.fastSpatialSpec(),
+        label = "build-plan-back-progress"
+    )
+    val visualPlanBackProgress = animatedPlanBackProgress
+        .coerceIn(0f, 1f)
+        .pow(BUILD_PLAN_BACK_VISUAL_EXPONENT)
+    val density = LocalDensity.current
+    val planBackOffsetPx = with(density) { BUILD_PLAN_BACK_MAX_OFFSET.toPx() }
+    val planBackCorner = with(density) { (BUILD_PLAN_BACK_MAX_CORNER.toPx() * visualPlanBackProgress).toDp() }
     var savePlanName by remember { mutableStateOf("") }
     var importPlanCode by remember { mutableStateOf("") }
     var importPlanPreview by remember { mutableStateOf<BuildPlanImportPreview?>(null) }
@@ -109,16 +136,42 @@ fun BuildScreen(
         if (config != rawConfig) vm.updateBuildConfig(config)
     }
 
-    BackHandler(enabled = showPlanLibraryPage) {
+    fun openPlanLibraryPage() {
+        planBackProgress = 0f
+        showPlanLibraryPage = true
+    }
+
+    fun closePlanLibraryPage() {
         showPlanLibraryPage = false
     }
 
     LaunchedEffect(showPlanLibraryPage) {
-        onPlanPageVisibleChange(showPlanLibraryPage)
+        if (showPlanLibraryPage) {
+            onPlanPageVisibleChange(true)
+        } else {
+            delay(BUILD_PLAN_PAGE_EXIT_DELAY_MS)
+            planBackProgress = 0f
+            onPlanPageVisibleChange(false)
+        }
     }
 
     DisposableEffect(Unit) {
         onDispose { onPlanPageVisibleChange(false) }
+    }
+
+    PredictiveBackHandler(enabled = showPlanLibraryPage && state.predictiveBackEnabled) { progress ->
+        try {
+            progress.collect { backEvent ->
+                planBackProgress = backEvent.progress.coerceIn(0f, 1f)
+            }
+            closePlanLibraryPage()
+        } catch (_: CancellationException) {
+            planBackProgress = 0f
+        }
+    }
+
+    BackHandler(enabled = showPlanLibraryPage && !state.predictiveBackEnabled) {
+        closePlanLibraryPage()
     }
 
     if (showConfirmDialog) {
@@ -281,89 +334,23 @@ fun BuildScreen(
         )
     }
 
-    Scaffold(
-        containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
-        topBar = {
-            AnimatedContent(
-                targetState = showPlanLibraryPage,
-                transitionSpec = {
-                    val direction = if (targetState) 1 else -1
-                    (
-                        fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
-                            slideInHorizontally(
-                                animationSpec = motionScheme.defaultSpatialSpec()
-                            ) { width -> direction * width / 4 }
-                        ) togetherWith (
-                        fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
-                            slideOutHorizontally(
-                                animationSpec = motionScheme.fastSpatialSpec()
-                            ) { width -> -direction * width / 6 }
-                        )
-                },
-                label = "build-plan-topbar"
-            ) { libraryVisible ->
-                if (libraryVisible) {
-                    ExpressiveTopBar(
-                        title = "方案库",
-                        navigationIcon = {
-                            IconButton(onClick = { showPlanLibraryPage = false }) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "返回构建配置")
-                            }
-                        }
-                    )
-                } else {
-                    ExpressiveTopBar(
-                        title = stringResource(R.string.build_title)
-                    )
-                }
-            }
-        }
-    ) { padding ->
-        AnimatedContent(
-            targetState = showPlanLibraryPage,
-            transitionSpec = {
-                val direction = if (targetState) 1 else -1
-                (
-                    fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
-                        slideInHorizontally(
-                            animationSpec = motionScheme.defaultSpatialSpec()
-                        ) { width -> direction * width / 4 }
-                    ) togetherWith (
-                    fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
-                        slideOutHorizontally(
-                            animationSpec = motionScheme.fastSpatialSpec()
-                        ) { width -> -direction * width / 6 }
-                    )
-            },
-            label = "build-plan-page"
-        ) { libraryVisible ->
-            if (libraryVisible) {
-                BuildPlanLibraryPage(
-                    plans = state.buildPlans,
-                    onApply = {
-                        vm.applyBuildPlan(it)
-                        showPlanLibraryPage = false
-                        Toast.makeText(context, "方案已应用，可继续修改", Toast.LENGTH_SHORT).show()
-                    },
-                    onShare = { sharePlanTarget = it },
-                    onRename = {
-                        renamePlanTarget = it
-                        renamePlanName = it.name
-                    },
-                    onDelete = { deletePlanTarget = it },
-                    modifier = Modifier
-                        .padding(padding)
-                        .fillMaxSize()
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
+            topBar = {
+                ExpressiveTopBar(
+                    title = stringResource(R.string.build_title)
                 )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .padding(padding)
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
+            }
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             BuildPlanHero(
                 config,
                 recommended,
@@ -379,7 +366,7 @@ fun BuildScreen(
                     savePlanName = suggestedPlanName
                     showSavePlanDialog = true
                 },
-                onLibrary = { showPlanLibraryPage = true },
+                onLibrary = ::openPlanLibraryPage,
                 onShare = {
                     sharePlanTarget = BuildPlan(name = suggestedPlanName, config = config)
                 },
@@ -688,6 +675,72 @@ fun BuildScreen(
             }
 
             Spacer(Modifier.height(80.dp))
+            }
+        }
+
+        AnimatedVisibility(
+            visible = showPlanLibraryPage,
+            enter = fadeIn(animationSpec = motionScheme.defaultEffectsSpec()),
+            exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = BUILD_PLAN_BACK_SCRIM_ALPHA * visualPlanBackProgress))
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showPlanLibraryPage,
+            enter = fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+                slideInHorizontally(animationSpec = motionScheme.defaultSpatialSpec()) { width -> width / 4 },
+            exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                slideOutHorizontally(animationSpec = motionScheme.fastSpatialSpec()) { width -> width },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = planBackOffsetPx * visualPlanBackProgress
+                        scaleX = 1f - BUILD_PLAN_BACK_SCALE_DELTA * visualPlanBackProgress
+                        scaleY = 1f - BUILD_PLAN_BACK_SCALE_DELTA * visualPlanBackProgress
+                        alpha = 1f - 0.06f * visualPlanBackProgress
+                        shape = RoundedCornerShape(planBackCorner)
+                        clip = visualPlanBackProgress > 0.01f
+                    }
+            ) {
+                Scaffold(
+                    containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
+                    topBar = {
+                        ExpressiveTopBar(
+                            title = "方案库",
+                            navigationIcon = {
+                                IconButton(onClick = ::closePlanLibraryPage) {
+                                    Icon(Icons.Default.ArrowBack, contentDescription = "返回构建配置")
+                                }
+                            }
+                        )
+                    }
+                ) { padding ->
+                    BuildPlanLibraryPage(
+                        plans = state.buildPlans,
+                        onApply = {
+                            vm.applyBuildPlan(it)
+                            closePlanLibraryPage()
+                            Toast.makeText(context, "方案已应用，可继续修改", Toast.LENGTH_SHORT).show()
+                        },
+                        onShare = { sharePlanTarget = it },
+                        onRename = {
+                            renamePlanTarget = it
+                            renamePlanName = it.name
+                        },
+                        onDelete = { deletePlanTarget = it },
+                        modifier = Modifier
+                            .padding(padding)
+                            .fillMaxSize()
+                    )
                 }
             }
         }
