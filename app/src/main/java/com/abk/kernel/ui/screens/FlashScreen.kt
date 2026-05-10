@@ -20,16 +20,22 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateTopPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -941,16 +947,19 @@ private fun FlashDetailBackSurface(
         onBack()
     }
 
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val childPageTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val childPageModifier = Modifier
+            .fillMaxWidth()
+            .height(maxHeight + childPageTopInset)
+            .offset(y = -childPageTopInset)
         backgroundContent()
         Box(
-            Modifier
-                .fillMaxSize()
+            childPageModifier
                 .background(Color.Black.copy(alpha = FLASH_DETAIL_BACK_SCRIM_ALPHA * visualBackProgress))
         )
         Box(
-            modifier = Modifier
-                .fillMaxSize()
+            modifier = childPageModifier
                 .graphicsLayer {
                     translationX = backOffsetPx * visualBackProgress
                     scaleX = 1f - FLASH_DETAIL_BACK_SCALE_DELTA * visualBackProgress

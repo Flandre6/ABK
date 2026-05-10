@@ -141,6 +141,7 @@ fun BuildScreen(
 
     fun openPlanLibraryPage() {
         planBackProgress = 0f
+        onPlanPageVisibleChange(true)
         showPlanLibraryPage = true
     }
 
@@ -337,7 +338,12 @@ fun BuildScreen(
         )
     }
 
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val childPageTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val childPageModifier = Modifier
+            .fillMaxWidth()
+            .height(maxHeight + childPageTopInset)
+            .offset(y = -childPageTopInset)
         Scaffold(
             containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
             topBar = {
@@ -685,7 +691,7 @@ fun BuildScreen(
             visible = showPlanLibraryPage,
             enter = fadeIn(animationSpec = motionScheme.defaultEffectsSpec()),
             exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
-            modifier = Modifier.fillMaxSize()
+            modifier = childPageModifier
         ) {
             Box(
                 Modifier
@@ -700,7 +706,7 @@ fun BuildScreen(
                 slideInHorizontally(animationSpec = motionScheme.defaultSpatialSpec()) { width -> width / 4 },
             exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
                 slideOutHorizontally(animationSpec = motionScheme.fastSpatialSpec()) { width -> width },
-            modifier = Modifier.fillMaxSize()
+            modifier = childPageModifier
         ) {
             Box(
                 modifier = Modifier

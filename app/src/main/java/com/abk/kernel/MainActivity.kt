@@ -327,7 +327,9 @@ private fun AbkMainScaffold(vm: MainViewModel) {
         }
     }
 
-    BackHandler(enabled = !hideBottomBar, onBack = ::handleTopLevelBack)
+    if (!hideBottomBar) {
+        BackHandler(onBack = ::handleTopLevelBack)
+    }
 
     Scaffold(
         containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
