@@ -158,7 +158,7 @@ fun SettingsScreen(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val childPageTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val childPageTopInset = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
         val childPageModifier = Modifier
             .fillMaxWidth()
             .height(maxHeight + childPageTopInset)
