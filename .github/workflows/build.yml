@@ -746,6 +746,7 @@ jobs:
           echo "KSU 分支: $BRANCH"
 
       - name: 添加 KernelSU
+        if: inputs.ksu_variant != 'None'
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           case "${{ inputs.ksu_variant }}" in
@@ -785,7 +786,7 @@ jobs:
           fi
 
       - name: 修复 SukiSU SUSFS 源码兼容
-        if: inputs.ksu_variant == 'SukiSU' && inputs.enable_susfs
+        if: inputs.ksu_variant == 'SukiSU' && inputs.enable_susfs && inputs.ksu_variant != 'None'
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           set -euo pipefail
@@ -941,7 +942,7 @@ jobs:
           echo "已更新 get_ksu_version_full 模板: $VERSION_TEMPLATE"
 
       - name: 应用 SUSFS 补丁
-        if: inputs.enable_susfs
+        if: inputs.enable_susfs && inputs.ksu_variant != 'None'
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           echo "应用 SUSFS 补丁..."
@@ -989,7 +990,7 @@ jobs:
             fi
           fi
 
-          if [ "${{ inputs.ksu_variant }}" == "Official" ] || [ "${{ inputs.ksu_variant }}" == "Next" ] || [ "${{ inputs.ksu_variant }}" == "SukiSU" ] || [ "${{ inputs.ksu_variant }}" == "ReSukiSU" ]; then
+          if [ "${{ inputs.ksu_variant }}" != "None" ] && { [ "${{ inputs.ksu_variant }}" == "Official" ] || [ "${{ inputs.ksu_variant }}" == "Next" ] || [ "${{ inputs.ksu_variant }}" == "SukiSU" ] || [ "${{ inputs.ksu_variant }}" == "ReSukiSU" ]; }; then
             CURRENT_SUB="${{ inputs.sub_level }}"
             if [[ ! "$CURRENT_SUB" =~ ^[0-9]+$ ]]; then
               CURRENT_SUB=99999
@@ -1957,11 +1958,13 @@ jobs:
       - name: 配置内核选项
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
-          cat >> "$DEFCONFIG" << 'EOF'
+          if [ "${{ inputs.ksu_variant }}" != "None" ]; then
+            cat >> "$DEFCONFIG" << 'EOF'
           CONFIG_KSU=y
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
           EOF
+          fi
 
           if [ "${{ inputs.use_kpm }}" == "true" ] && { [ "${{ inputs.ksu_variant }}" == "SukiSU" ] || [ "${{ inputs.ksu_variant }}" == "ReSukiSU" ] || [ "${{ inputs.ksu_variant }}" == "Next" ]; }; then
             echo "CONFIG_KPM=y" >> "$DEFCONFIG"
@@ -1993,7 +1996,7 @@ jobs:
           echo "CONFIG_KPM_SUPER_KEY 不是当前 KSU Kconfig 符号，不能写入 defconfig fragment。"
 
       - name: 添加 SUSFS 配置
-        if: inputs.enable_susfs
+        if: inputs.enable_susfs && inputs.ksu_variant != 'None'
         run: |
           cat >> "$DEFCONFIG" << 'EOF'
           CONFIG_KSU_SUSFS=y

@@ -20,6 +20,7 @@ on:
 
 jobs:
   get_ksu_manager:
+    if: inputs.kernelsu_variant != 'None'
     runs-on: ubuntu-latest
     outputs:
       # 输出1: KSU版本号
