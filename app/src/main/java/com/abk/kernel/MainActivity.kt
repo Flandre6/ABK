@@ -283,11 +283,13 @@ private fun AbkMainScaffold(vm: MainViewModel) {
     var selectedTab by rememberSaveable { mutableStateOf(AbkTab.Status) }
     var flashDetailPageVisible by rememberSaveable { mutableStateOf(false) }
     var settingsThemePageVisible by rememberSaveable { mutableStateOf(false) }
+    var buildPlanPageVisible by rememberSaveable { mutableStateOf(false) }
     var lastBackAt by remember { mutableStateOf(0L) }
     val visibleTabs = AbkTab.entries
     val activeTab = selectedTab
     val motionScheme = MaterialTheme.motionScheme
     val hideBottomBar = when (activeTab) {
+        AbkTab.Build -> buildPlanPageVisible
         AbkTab.Flash -> flashDetailPageVisible
         AbkTab.Settings -> settingsThemePageVisible
         else -> false
@@ -295,9 +297,20 @@ private fun AbkMainScaffold(vm: MainViewModel) {
 
     LaunchedEffect(activeTab) {
         when (activeTab) {
-            AbkTab.Flash -> settingsThemePageVisible = false
-            AbkTab.Settings -> flashDetailPageVisible = false
+            AbkTab.Build -> {
+                flashDetailPageVisible = false
+                settingsThemePageVisible = false
+            }
+            AbkTab.Flash -> {
+                buildPlanPageVisible = false
+                settingsThemePageVisible = false
+            }
+            AbkTab.Settings -> {
+                buildPlanPageVisible = false
+                flashDetailPageVisible = false
+            }
             else -> {
+                buildPlanPageVisible = false
                 flashDetailPageVisible = false
                 settingsThemePageVisible = false
             }
@@ -382,7 +395,10 @@ private fun AbkMainScaffold(vm: MainViewModel) {
             ) { tab ->
                 when (tab) {
                     AbkTab.Status -> StatusScreen(vm)
-                    AbkTab.Build -> BuildScreen(vm)
+                    AbkTab.Build -> BuildScreen(
+                        vm = vm,
+                        onPlanPageVisibleChange = { buildPlanPageVisible = it }
+                    )
                     AbkTab.Flash -> FlashScreen(
                         vm = vm,
                         onDetailPageVisibleChange = { flashDetailPageVisible = it }

@@ -20,20 +20,16 @@ import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.NotificationUtils
 import com.abk.kernel.utils.RootUtils
 import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.UUID
-import java.util.zip.GZIPInputStream
-import java.util.zip.GZIPOutputStream
 
 // ── UI State ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +38,13 @@ enum class AuthStep { CHECK_ROOT, LOGIN, FORK_CHECK, READY }
 data class WorkflowEnablementPrompt(
     val message: String,
     val actionUrl: String
+)
+
+enum class BuildPlanShareScope { FULL, FEATURES_ONLY }
+
+data class BuildPlanImportPreview(
+    val plan: BuildPlan,
+    val scope: BuildPlanShareScope
 )
 
 data class MainUiState(
@@ -97,19 +100,6 @@ data class MainUiState(
     val downloadMirrorBaseUrl: String = "",
     val prebuiltGkiEnabled: Boolean = true,
     val predictiveBackEnabled: Boolean = true
-)
-
-private data class BuildPlanCodeEnvelope(
-    @SerializedName("v")
-    val formatVersion: Int = BUILD_PLAN_CODE_VERSION,
-    @SerializedName("n")
-    val name: String = "",
-    @SerializedName("c")
-    val config: KernelBuildConfig = KernelBuildConfig(),
-    @SerializedName("ca")
-    val createdAt: Long = 0L,
-    @SerializedName("ua")
-    val updatedAt: Long = 0L
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -1503,46 +1493,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveBuildPlans(renamed.sortedByDescending { it.updatedAt })
     }
 
-    fun shareBuildPlanCode(config: KernelBuildConfig, name: String): String {
+    fun shareBuildPlanCode(
+        config: KernelBuildConfig,
+        name: String,
+        scope: BuildPlanShareScope
+    ): String {
         val normalized = KernelSupport.normalize(config)
-        val now = System.currentTimeMillis()
-        val envelope = BuildPlanCodeEnvelope(
-            name = sanitizeBuildPlanName(name, normalized),
-            config = normalized,
-            createdAt = now,
-            updatedAt = now
+        val payload = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            encodeBuildPlanPayload(
+                config = normalized,
+                name = sanitizeBuildPlanName(name, normalized),
+                scope = scope
+            )
         )
-        val compressed = gzipText(gson.toJson(envelope))
-        val payload = Base64.getUrlEncoder().withoutPadding().encodeToString(compressed)
         return "$BUILD_PLAN_CODE_PREFIX$payload"
     }
 
-    fun parseBuildPlanCode(code: String): BuildPlan {
+    fun parseBuildPlanCode(
+        code: String,
+        baseConfig: KernelBuildConfig = _uiState.value.buildConfig
+    ): BuildPlanImportPreview {
         val compact = code.trim().replace(Regex("\\s+"), "")
+        require(!compact.startsWith(BUILD_PLAN_LEGACY_CODE_PREFIX)) {
+            "旧版 ABKP1 方案码太长，已不再支持，请重新分享"
+        }
         require(compact.startsWith(BUILD_PLAN_CODE_PREFIX)) { "方案码格式不正确" }
         val payload = compact.removePrefix(BUILD_PLAN_CODE_PREFIX)
         require(payload.isNotBlank()) { "方案码为空" }
-        val json = gunzipText(Base64.getUrlDecoder().decode(padBase64Url(payload)))
-        val envelope = gson.fromJson(json, BuildPlanCodeEnvelope::class.java)
-            ?: throw IllegalArgumentException("方案码内容为空")
-        require(envelope.formatVersion == BUILD_PLAN_CODE_VERSION) { "不支持的方案码版本" }
-        val normalized = KernelSupport.normalize(envelope.config)
+        val decoded = decodeBuildPlanPayload(
+            bytes = Base64.getUrlDecoder().decode(padBase64Url(payload)),
+            baseConfig = KernelSupport.normalize(baseConfig)
+        )
         val now = System.currentTimeMillis()
-        return BuildPlan(
-            id = UUID.randomUUID().toString(),
-            name = sanitizeBuildPlanName(envelope.name, normalized),
-            config = normalized,
-            createdAt = envelope.createdAt.takeIf { it > 0L } ?: now,
-            updatedAt = now
+        return BuildPlanImportPreview(
+            plan = BuildPlan(
+                id = UUID.randomUUID().toString(),
+                name = sanitizeBuildPlanName(decoded.name, decoded.config),
+                config = decoded.config,
+                createdAt = now,
+                updatedAt = now
+            ),
+            scope = decoded.scope
         )
     }
 
-    fun importBuildPlanToLibrary(plan: BuildPlan) {
+    fun importBuildPlanToLibrary(preview: BuildPlanImportPreview) {
         val now = System.currentTimeMillis()
-        val normalized = KernelSupport.normalize(plan.config)
-        val stored = plan.copy(
+        val normalized = KernelSupport.normalize(preview.plan.config)
+        val stored = preview.plan.copy(
             id = UUID.randomUUID().toString(),
-            name = sanitizeBuildPlanName(plan.name, normalized),
+            name = sanitizeBuildPlanName(preview.plan.name, normalized),
             config = normalized,
             createdAt = now,
             updatedAt = now
@@ -1550,8 +1550,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveBuildPlans((_uiState.value.buildPlans + stored).sortedByDescending { it.updatedAt })
     }
 
-    fun importBuildPlanToCurrentConfig(plan: BuildPlan) {
-        updateBuildConfig(plan.config)
+    fun importBuildPlanToCurrentConfig(preview: BuildPlanImportPreview) {
+        updateBuildConfig(preview.plan.config)
     }
 
     private fun saveBuildPlans(plans: List<BuildPlan>) {
@@ -1743,25 +1743,246 @@ private fun defaultBuildPlanName(config: KernelBuildConfig): String {
         .joinToString(" · ")
 }
 
-private fun gzipText(text: String): ByteArray {
-    val output = ByteArrayOutputStream()
-    GZIPOutputStream(output).use { gzip ->
-        gzip.write(text.toByteArray(StandardCharsets.UTF_8))
-    }
-    return output.toByteArray()
-}
-
-private fun gunzipText(bytes: ByteArray): String =
-    GZIPInputStream(ByteArrayInputStream(bytes)).use { gzip ->
-        String(gzip.readBytes(), StandardCharsets.UTF_8)
-    }
-
 private fun padBase64Url(value: String): String =
     value + "=".repeat((4 - value.length % 4) % 4)
 
-private const val BUILD_PLAN_CODE_PREFIX = "ABKP1:"
-private const val BUILD_PLAN_CODE_VERSION = 1
+private data class DecodedBuildPlanCode(
+    val name: String,
+    val config: KernelBuildConfig,
+    val scope: BuildPlanShareScope
+)
+
+private fun encodeBuildPlanPayload(
+    config: KernelBuildConfig,
+    name: String,
+    scope: BuildPlanShareScope
+): ByteArray {
+    val writer = BuildPlanBinaryWriter()
+    writer.writeByte(BUILD_PLAN_CODE_VERSION)
+    writer.writeByte(scope.toWireValue())
+    writer.writeString(name)
+    if (scope == BuildPlanShareScope.FULL) {
+        writer.writeString(config.androidVersion)
+        writer.writeString(config.kernelVersion)
+        writer.writeString(config.subLevel)
+        writer.writeString(config.osPatchLevel)
+        writer.writeString(config.revision)
+    }
+    writer.writeByte(BUILD_PLAN_KSU_VARIANTS.indexOrZero(config.kernelsuVariant))
+    writer.writeByte(BUILD_PLAN_KSU_BRANCHES.indexOrZero(config.kernelsuBranch))
+    writer.writeByte(BUILD_PLAN_VIRTUALIZATION_OPTIONS.indexOrZero(config.virtualizationSupport))
+    writer.writeVarInt(config.toBuildPlanFeatureMask())
+    writer.writeString(config.version)
+    writer.writeString(config.buildTime)
+    writer.writeString(config.zramExtraAlgos)
+    writer.writeString(config.kpmPassword)
+    val modules = if (config.useCustomExternalModules) {
+        config.customExternalModules
+            .mapNotNull { module ->
+                val url = module.url.trim()
+                if (url.isBlank()) {
+                    null
+                } else {
+                    CustomExternalModule(
+                        url = url,
+                        stage = CustomExternalModuleStage.normalize(module.stage)
+                    )
+                }
+            }
+            .take(BUILD_PLAN_MAX_MODULES)
+    } else {
+        emptyList()
+    }
+    writer.writeVarInt(modules.size)
+    modules.forEach { module ->
+        writer.writeString(module.url)
+        writer.writeByte(BUILD_PLAN_MODULE_STAGES.indexOrZero(CustomExternalModuleStage.normalize(module.stage)))
+    }
+    return writer.toByteArray()
+}
+
+private fun decodeBuildPlanPayload(bytes: ByteArray, baseConfig: KernelBuildConfig): DecodedBuildPlanCode {
+    val reader = BuildPlanBinaryReader(bytes)
+    val version = reader.readByte()
+    require(version == BUILD_PLAN_CODE_VERSION) { "不支持的方案码版本" }
+    val scope = buildPlanShareScopeFromWireValue(reader.readByte())
+    val name = reader.readString()
+    val versionBase = if (scope == BuildPlanShareScope.FULL) {
+        baseConfig.copy(
+            androidVersion = reader.readString(),
+            kernelVersion = reader.readString(),
+            subLevel = reader.readString(),
+            osPatchLevel = reader.readString(),
+            revision = reader.readString()
+        )
+    } else {
+        baseConfig
+    }
+    val ksuVariant = BUILD_PLAN_KSU_VARIANTS.valueOrDefault(reader.readByte(), versionBase.kernelsuVariant)
+    val ksuBranch = BUILD_PLAN_KSU_BRANCHES.valueOrDefault(reader.readByte(), versionBase.kernelsuBranch)
+    val virtualizationSupport = BUILD_PLAN_VIRTUALIZATION_OPTIONS.valueOrDefault(
+        reader.readByte(),
+        versionBase.virtualizationSupport
+    )
+    val featureMask = reader.readVarInt()
+    val versionName = reader.readString()
+    val buildTime = reader.readString()
+    val zramExtraAlgos = reader.readString()
+    val kpmPassword = reader.readString()
+    val moduleCount = reader.readVarInt()
+    require(moduleCount in 0..BUILD_PLAN_MAX_MODULES) { "外部模块数量超出限制" }
+    val modules = List(moduleCount) {
+        CustomExternalModule(
+            url = reader.readString().trim(),
+            stage = BUILD_PLAN_MODULE_STAGES.valueOrDefault(
+                reader.readByte(),
+                CustomExternalModuleStage.AFTER_PATCH
+            )
+        )
+    }.filter { it.url.isNotBlank() }
+    reader.requireFullyRead()
+    val merged = versionBase.copy(
+        kernelsuVariant = ksuVariant,
+        kernelsuBranch = ksuBranch,
+        version = versionName,
+        buildTime = buildTime,
+        useZram = featureMask.hasBuildPlanFlag(0),
+        useBbg = featureMask.hasBuildPlanFlag(1),
+        useDdk = featureMask.hasBuildPlanFlag(2),
+        useNtsync = featureMask.hasBuildPlanFlag(3),
+        useNetworking = featureMask.hasBuildPlanFlag(4),
+        useKpm = featureMask.hasBuildPlanFlag(5),
+        useRekernel = featureMask.hasBuildPlanFlag(6),
+        cancelSusfs = featureMask.hasBuildPlanFlag(7),
+        suppOp = featureMask.hasBuildPlanFlag(8),
+        zramFullAlgo = featureMask.hasBuildPlanFlag(9),
+        zramExtraAlgos = zramExtraAlgos,
+        kpmPassword = kpmPassword,
+        virtualizationSupport = virtualizationSupport,
+        useCustomExternalModules = featureMask.hasBuildPlanFlag(10),
+        customExternalModules = modules
+    )
+    return DecodedBuildPlanCode(
+        name = name,
+        config = KernelSupport.normalize(merged),
+        scope = scope
+    )
+}
+
+private class BuildPlanBinaryWriter {
+    private val output = ByteArrayOutputStream()
+
+    fun writeByte(value: Int) {
+        output.write(value and 0xff)
+    }
+
+    fun writeVarInt(value: Int) {
+        require(value >= 0) { "负数无法写入方案码" }
+        var remaining = value
+        do {
+            var byteValue = remaining and 0x7f
+            remaining = remaining ushr 7
+            if (remaining != 0) byteValue = byteValue or 0x80
+            writeByte(byteValue)
+        } while (remaining != 0)
+    }
+
+    fun writeString(value: String) {
+        val bytes = value.toByteArray(StandardCharsets.UTF_8)
+        require(bytes.size <= BUILD_PLAN_MAX_STRING_BYTES) { "方案字段过长" }
+        writeVarInt(bytes.size)
+        output.write(bytes)
+    }
+
+    fun toByteArray(): ByteArray = output.toByteArray()
+}
+
+private class BuildPlanBinaryReader(private val bytes: ByteArray) {
+    private var position = 0
+
+    fun readByte(): Int {
+        require(position < bytes.size) { "方案码内容不完整" }
+        return bytes[position++].toInt() and 0xff
+    }
+
+    fun readVarInt(): Int {
+        var result = 0
+        var shift = 0
+        while (shift <= 28) {
+            val byteValue = readByte()
+            result = result or ((byteValue and 0x7f) shl shift)
+            if (byteValue and 0x80 == 0) return result
+            shift += 7
+        }
+        throw IllegalArgumentException("方案码数字字段异常")
+    }
+
+    fun readString(): String {
+        val length = readVarInt()
+        require(length in 0..BUILD_PLAN_MAX_STRING_BYTES) { "方案字段过长" }
+        require(position + length <= bytes.size) { "方案码内容不完整" }
+        val value = String(bytes, position, length, StandardCharsets.UTF_8)
+        position += length
+        return value
+    }
+
+    fun requireFullyRead() {
+        require(position == bytes.size) { "方案码包含无法识别的数据" }
+    }
+}
+
+private fun BuildPlanShareScope.toWireValue(): Int = when (this) {
+    BuildPlanShareScope.FULL -> 0
+    BuildPlanShareScope.FEATURES_ONLY -> 1
+}
+
+private fun KernelBuildConfig.toBuildPlanFeatureMask(): Int {
+    var mask = 0
+    fun set(bit: Int, enabled: Boolean) {
+        if (enabled) mask = mask or (1 shl bit)
+    }
+    set(0, useZram)
+    set(1, useBbg)
+    set(2, useDdk)
+    set(3, useNtsync)
+    set(4, useNetworking)
+    set(5, useKpm)
+    set(6, useRekernel)
+    set(7, cancelSusfs)
+    set(8, suppOp)
+    set(9, zramFullAlgo)
+    set(10, useCustomExternalModules)
+    return mask
+}
+
+private fun Int.hasBuildPlanFlag(bit: Int): Boolean = this and (1 shl bit) != 0
+
+private fun List<String>.indexOrZero(value: String): Int =
+    indexOf(value).takeIf { it >= 0 } ?: 0
+
+private fun List<String>.valueOrDefault(index: Int, fallback: String): String =
+    getOrNull(index) ?: fallback
+
+private fun buildPlanShareScopeFromWireValue(value: Int): BuildPlanShareScope = when (value) {
+    0 -> BuildPlanShareScope.FULL
+    1 -> BuildPlanShareScope.FEATURES_ONLY
+    else -> throw IllegalArgumentException("不支持的方案分享类型")
+}
+
+private const val BUILD_PLAN_CODE_PREFIX = "ABKP2:"
+private const val BUILD_PLAN_LEGACY_CODE_PREFIX = "ABKP1:"
+private const val BUILD_PLAN_CODE_VERSION = 2
 private const val BUILD_PLAN_NAME_LIMIT = 80
+private const val BUILD_PLAN_MAX_STRING_BYTES = 4096
+private const val BUILD_PLAN_MAX_MODULES = 32
+
+private val BUILD_PLAN_KSU_VARIANTS = listOf("Official", "SukiSU", "ReSukiSU")
+private val BUILD_PLAN_KSU_BRANCHES = listOf("Stable(标准)", "Dev(开发)")
+private val BUILD_PLAN_VIRTUALIZATION_OPTIONS = listOf("off", "on", "678", "123", "345")
+private val BUILD_PLAN_MODULE_STAGES = listOf(
+    CustomExternalModuleStage.AFTER_PATCH,
+    CustomExternalModuleStage.BEFORE_BUILD
+)
 
 private const val BUILD_SUMMARY_STEP_NAME = "构建信息摘要"
 
