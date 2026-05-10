@@ -12,8 +12,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -316,7 +319,13 @@ private fun AbkMainScaffold(vm: MainViewModel) {
     Scaffold(
         containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
         bottomBar = {
-            if (!hideBottomBar) {
+            AnimatedVisibility(
+                visible = !hideBottomBar,
+                enter = fadeIn(animationSpec = motionScheme.fastEffectsSpec()) +
+                    slideInVertically(animationSpec = motionScheme.fastSpatialSpec()) { height -> height },
+                exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                    slideOutVertically(animationSpec = motionScheme.fastSpatialSpec()) { height -> height }
+            ) {
                 NavigationBar(
                     containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surfaceContainer),
                     tonalElevation = 0.dp
