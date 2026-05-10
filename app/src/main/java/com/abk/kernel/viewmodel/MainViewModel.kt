@@ -1452,44 +1452,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val run = findRunForParameterSummary(username, repoName, runId)
-            val jobs = when (val jobsResult = github.listRunJobs(username, repoName, runId)) {
-                is Result.Success -> jobsResult.data
-                is Result.Error -> {
-                    setBuildParameterLoadError(runId, jobsResult.message)
-                    return@launch
+            var firstFailure: String? = null
+            val summaryJob = when (val jobsResult = github.listRunJobs(username, repoName, runId)) {
+                is Result.Success -> jobsResult.data.firstOrNull { job ->
+                    job.steps.orEmpty().any { step -> step.name == BUILD_SUMMARY_STEP_NAME }
+                }.also {
+                    if (it == null) firstFailure = "未找到“$BUILD_SUMMARY_STEP_NAME”步骤"
                 }
-                Result.Loading -> emptyList()
-            }
-            val summaryJob = jobs.firstOrNull { job ->
-                job.steps.orEmpty().any { step -> step.name == BUILD_SUMMARY_STEP_NAME }
-            }
-            if (summaryJob == null) {
-                setBuildParameterLoadError(runId, "未找到“$BUILD_SUMMARY_STEP_NAME”步骤")
-                return@launch
-            }
-            val logs = when (val logsResult = github.downloadJobLogs(username, repoName, summaryJob.id)) {
-                is Result.Success -> logsResult.data
                 is Result.Error -> {
-                    setBuildParameterLoadError(runId, logsResult.message)
-                    return@launch
+                    firstFailure = jobsResult.message
+                    null
                 }
-                Result.Loading -> ""
+                Result.Loading -> null
             }
-            val summary = parseBuildParameterSummary(logs, runId, run)
-            if (summary == null) {
-                setBuildParameterLoadError(runId, "日志中没有可解析的构建信息摘要")
-                return@launch
+
+            if (summaryJob != null) {
+                when (val logsResult = github.downloadJobLogs(username, repoName, summaryJob.id)) {
+                    is Result.Success -> {
+                        val summary = parseBuildParameterSummary(logsResult.data, runId, run)
+                        if (summary != null) {
+                            saveBuildParameterSummary(runId, summary)
+                            return@launch
+                        }
+                        firstFailure = "job 日志中没有可解析的构建信息摘要"
+                    }
+                    is Result.Error -> firstFailure = logsResult.message
+                    Result.Loading -> Unit
+                }
             }
-            val updated = _uiState.value.buildParameterSummaries + (runId to summary)
-            _uiState.update {
-                it.copy(
-                    buildParameterSummaries = updated,
-                    loadingBuildParameterRunIds = it.loadingBuildParameterRunIds - runId,
-                    buildParameterErrors = it.buildParameterErrors - runId
-                )
+
+            when (val runLogsResult = github.downloadRunLogs(username, repoName, runId)) {
+                is Result.Success -> {
+                    val summary = parseBuildParameterSummary(runLogsResult.data, runId, run)
+                    if (summary != null) {
+                        saveBuildParameterSummary(runId, summary)
+                        return@launch
+                    }
+                    val prefix = firstFailure?.let { "$it；" }.orEmpty()
+                    setBuildParameterLoadError(runId, "${prefix}workflow 日志中没有可解析的构建信息摘要")
+                }
+                is Result.Error -> {
+                    val prefix = firstFailure?.let { "job 日志读取失败：$it；" }.orEmpty()
+                    setBuildParameterLoadError(runId, "${prefix}workflow 日志读取失败：${runLogsResult.message}")
+                }
+                Result.Loading -> setBuildParameterLoadError(runId, "日志读取尚未完成")
             }
-            prefs.saveBuildParameterSummariesJson(gson.toJson(updated.values.sortedByDescending { it.runNumber }))
         }
+    }
+
+    private suspend fun saveBuildParameterSummary(runId: Long, summary: BuildParameterSummary) {
+        val updated = _uiState.value.buildParameterSummaries + (runId to summary)
+        _uiState.update {
+            it.copy(
+                buildParameterSummaries = updated,
+                loadingBuildParameterRunIds = it.loadingBuildParameterRunIds - runId,
+                buildParameterErrors = it.buildParameterErrors - runId
+            )
+        }
+        prefs.saveBuildParameterSummariesJson(gson.toJson(updated.values.sortedByDescending { it.runNumber }))
     }
 
     private fun parseDownloadedArtifacts(json: String?): List<DownloadedArtifact> {

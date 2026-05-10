@@ -101,6 +101,14 @@ interface GitHubApiService {
         @Path("job_id") jobId: Long
     ): Response<ResponseBody>
 
+    @Streaming
+    @GET("repos/{owner}/{repo}/actions/runs/{run_id}/logs")
+    suspend fun downloadRunLogs(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("run_id") runId: Long
+    ): Response<ResponseBody>
+
     // ── Artifacts ─────────────────────────────────────────────────────────
     @GET("repos/{owner}/{repo}/actions/runs/{run_id}/artifacts")
     suspend fun listArtifacts(
