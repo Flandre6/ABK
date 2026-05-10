@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -14,7 +15,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -67,6 +71,7 @@ fun BuildScreen(
     val rawConfig = state.buildConfig
     val config = remember(rawConfig) { KernelSupport.normalize(rawConfig) }
     val recommended = state.recommendedBuildConfig
+    val motionScheme = MaterialTheme.motionScheme
     val suggestedPlanName = remember(config) { vm.suggestedBuildPlanName(config) }
     val ksuBranchOptions = listOf("Stable(标准)", "Dev(开发)")
     val virtualizationSupportOptions = remember(config.kernelVersion) {
@@ -279,49 +284,86 @@ fun BuildScreen(
     Scaffold(
         containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
         topBar = {
-            if (showPlanLibraryPage) {
-                ExpressiveTopBar(
-                    title = "方案库",
-                    navigationIcon = {
-                        IconButton(onClick = { showPlanLibraryPage = false }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "返回构建配置")
+            AnimatedContent(
+                targetState = showPlanLibraryPage,
+                transitionSpec = {
+                    val direction = if (targetState) 1 else -1
+                    (
+                        fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+                            slideInHorizontally(
+                                animationSpec = motionScheme.defaultSpatialSpec()
+                            ) { width -> direction * width / 4 }
+                        ) togetherWith (
+                        fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                            slideOutHorizontally(
+                                animationSpec = motionScheme.fastSpatialSpec()
+                            ) { width -> -direction * width / 6 }
+                        )
+                },
+                label = "build-plan-topbar"
+            ) { libraryVisible ->
+                if (libraryVisible) {
+                    ExpressiveTopBar(
+                        title = "方案库",
+                        navigationIcon = {
+                            IconButton(onClick = { showPlanLibraryPage = false }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "返回构建配置")
+                            }
                         }
-                    }
-                )
-            } else {
-                ExpressiveTopBar(
-                    title = stringResource(R.string.build_title)
-                )
+                    )
+                } else {
+                    ExpressiveTopBar(
+                        title = stringResource(R.string.build_title)
+                    )
+                }
             }
         }
     ) { padding ->
-        if (showPlanLibraryPage) {
-            BuildPlanLibraryPage(
-                plans = state.buildPlans,
-                onApply = {
-                    vm.applyBuildPlan(it)
-                    showPlanLibraryPage = false
-                    Toast.makeText(context, "方案已应用，可继续修改", Toast.LENGTH_SHORT).show()
-                },
-                onShare = { sharePlanTarget = it },
-                onRename = {
-                    renamePlanTarget = it
-                    renamePlanName = it.name
-                },
-                onDelete = { deletePlanTarget = it },
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-            )
-        } else {
-            Column(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+        AnimatedContent(
+            targetState = showPlanLibraryPage,
+            transitionSpec = {
+                val direction = if (targetState) 1 else -1
+                (
+                    fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+                        slideInHorizontally(
+                            animationSpec = motionScheme.defaultSpatialSpec()
+                        ) { width -> direction * width / 4 }
+                    ) togetherWith (
+                    fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                        slideOutHorizontally(
+                            animationSpec = motionScheme.fastSpatialSpec()
+                        ) { width -> -direction * width / 6 }
+                    )
+            },
+            label = "build-plan-page"
+        ) { libraryVisible ->
+            if (libraryVisible) {
+                BuildPlanLibraryPage(
+                    plans = state.buildPlans,
+                    onApply = {
+                        vm.applyBuildPlan(it)
+                        showPlanLibraryPage = false
+                        Toast.makeText(context, "方案已应用，可继续修改", Toast.LENGTH_SHORT).show()
+                    },
+                    onShare = { sharePlanTarget = it },
+                    onRename = {
+                        renamePlanTarget = it
+                        renamePlanName = it.name
+                    },
+                    onDelete = { deletePlanTarget = it },
+                    modifier = Modifier
+                        .padding(padding)
+                        .fillMaxSize()
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .padding(padding)
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
             BuildPlanHero(
                 config,
                 recommended,
@@ -646,6 +688,7 @@ fun BuildScreen(
             }
 
             Spacer(Modifier.height(80.dp))
+                }
             }
         }
     }
