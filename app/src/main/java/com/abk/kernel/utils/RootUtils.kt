@@ -115,6 +115,36 @@ object RootUtils {
         return execRootScript(script, timeoutSeconds = 240)
     }
 
+    fun installApk(apkPath: String): ShellResult {
+        val safeApk = shellQuote(apkPath)
+        val script = """
+            set -e
+            echo "[ABK] 开始安装管理器 APK"
+            echo "[ABK] APK 路径: $safeApk"
+            [ -f $safeApk ] || { echo "APK 文件不存在"; exit 2; }
+            apk_size=${'$'}(wc -c < $safeApk 2>/dev/null || echo 0)
+            echo "[ABK] APK 大小: ${'$'}apk_size bytes"
+            tmp="/data/local/tmp/abk-manager-${'$'}$.apk"
+            rm -f "${'$'}tmp" 2>/dev/null || true
+            echo "[ABK] 复制 APK 到临时安装路径: ${'$'}tmp"
+            cat $safeApk > "${'$'}tmp"
+            chmod 0644 "${'$'}tmp"
+            echo "[ABK] 执行 pm install -r"
+            set +e
+            pm install -r "${'$'}tmp"
+            rc=${'$'}?
+            set -e
+            rm -f "${'$'}tmp" 2>/dev/null || true
+            if [ "${'$'}rc" -eq 0 ]; then
+                echo "[ABK] 管理器 APK 安装完成"
+            else
+                echo "[ABK] 管理器 APK 安装失败: ${'$'}rc"
+            fi
+            exit "${'$'}rc"
+        """.trimIndent()
+        return execRootScript(script, timeoutSeconds = 240)
+    }
+
     fun flashAnyKernel3(context: Context, zipPath: String): ShellResult {
         val workDir = File(context.filesDir, "ak3-flash").apply {
             deleteRecursively()
