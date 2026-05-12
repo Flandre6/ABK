@@ -1219,10 +1219,8 @@ jobs:
               if [[ "$CURRENT_SUB" -le 58 ]]; then
                 cp $KERNEL_PATCHES/wild/susfs_fix_patches/v${SUSFS_VERSION}/a15-6.6/task_mmu.c.patch ./
                 patch -p1 < task_mmu.c.patch || true
-                if [[ "${{ inputs.ksu_variant }}" == "ReSukiSU" ]]; then
-                  fix_task_mmu_unused_vma_decl
-                  fix_memory_missing_susfs_def
-                fi
+                fix_task_mmu_unused_vma_decl
+                fix_memory_missing_susfs_def
               fi
             fi
 
