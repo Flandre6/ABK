@@ -7,6 +7,7 @@ package com.abk.kernel.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,9 +34,9 @@ import androidx.compose.ui.unit.sp
 import com.abk.kernel.ui.theme.uiSurfaceColor
 
 val AbkScreenHorizontalPadding: Dp = 24.dp
-private val ExpressiveTopBarCollapsedHeight: Dp = 56.dp
-private val ExpressiveTopBarCompactExpandedHeight: Dp = ExpressiveTopBarCollapsedHeight
-private val ExpressiveTopBarExpandedHeight: Dp = ExpressiveTopBarCollapsedHeight
+private val ExpressiveTopBarActionHeight: Dp = 48.dp
+private val ExpressiveTopBarCompactTitleHeight: Dp = 62.dp
+private val ExpressiveTopBarExpandedTitleHeight: Dp = 72.dp
 
 @Composable
 fun ExpressiveFlexibleTopBar(
@@ -71,14 +72,13 @@ fun ExpressiveTopBar(
     val useLargeTitle = largeTitle || !hasNavigation
     val behavior = scrollBehavior
     val density = LocalDensity.current
-    val expandedHeight = if (compactTitle) {
-        ExpressiveTopBarCompactExpandedHeight
+    val expandedTitleHeight = if (compactTitle) {
+        ExpressiveTopBarCompactTitleHeight
     } else {
-        ExpressiveTopBarExpandedHeight
+        ExpressiveTopBarExpandedTitleHeight
     }
-    val rawCollapseRange = expandedHeight - ExpressiveTopBarCollapsedHeight
-    val canCollapse = collapsing && useLargeTitle && behavior != null && rawCollapseRange.value > 0f
-    val collapseRange = if (canCollapse) rawCollapseRange else 0.dp
+    val canCollapse = collapsing && useLargeTitle && behavior != null
+    val collapseRange = if (canCollapse) expandedTitleHeight else 0.dp
 
     if (useLargeTitle && behavior != null) {
         SideEffect {
@@ -100,11 +100,7 @@ fun ExpressiveTopBar(
         0f
     }
     val expandedFraction = 1f - collapsedFraction
-    val barHeight = if (useLargeTitle) {
-        ExpressiveTopBarCollapsedHeight + (expandedHeight - ExpressiveTopBarCollapsedHeight) * expandedFraction
-    } else {
-        ExpressiveTopBarCollapsedHeight
-    }
+    val titleCollapseOffsetPx = with(density) { 16.dp.toPx() }
 
     val largeTitleStyle = if (compactTitle) {
         MaterialTheme.typography.headlineLarge.copy(
@@ -132,57 +128,74 @@ fun ExpressiveTopBar(
         color = uiSurfaceColor(MaterialTheme.colorScheme.surface),
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .height(barHeight)
-                .padding(
-                    start = if (hasNavigation) 4.dp else AbkScreenHorizontalPadding,
-                    end = AbkScreenHorizontalPadding
-                ),
-            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (navigationIcon != null) {
-                Box(
-                    modifier = Modifier.size(48.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    navigationIcon()
-                }
-            }
-            Box(
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .clipToBounds(),
-                contentAlignment = Alignment.CenterStart
+                    .fillMaxWidth()
+                    .height(ExpressiveTopBarActionHeight)
+                    .padding(
+                        start = if (hasNavigation) 4.dp else AbkScreenHorizontalPadding,
+                        end = AbkScreenHorizontalPadding
+                    ),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (useLargeTitle) {
+                if (navigationIcon != null) {
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        navigationIcon()
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clipToBounds(),
+                    contentAlignment = Alignment.CenterStart
+                ) {
                     Text(
                         text = title,
-                        modifier = Modifier.graphicsLayer { alpha = expandedFraction },
+                        modifier = Modifier.graphicsLayer {
+                            alpha = if (useLargeTitle) collapsedFraction else 1f
+                        },
+                        style = collapsedTitleStyle,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = actions
+                )
+            }
+            if (useLargeTitle) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(expandedTitleHeight * expandedFraction)
+                        .padding(horizontal = AbkScreenHorizontalPadding)
+                        .clipToBounds()
+                        .graphicsLayer {
+                            alpha = expandedFraction
+                            translationY = -titleCollapseOffsetPx * collapsedFraction
+                        },
+                    contentAlignment = Alignment.BottomStart
+                ) {
+                    Text(
+                        text = title,
                         style = largeTitleStyle,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Text(
-                    text = title,
-                    modifier = Modifier.graphicsLayer {
-                        alpha = if (useLargeTitle) collapsedFraction else 1f
-                    },
-                    style = collapsedTitleStyle,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                content = actions
-            )
         }
     }
 }
