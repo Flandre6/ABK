@@ -21,10 +21,12 @@ import com.abk.kernel.utils.NotificationUtils
 import com.abk.kernel.utils.RootUtils
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -103,7 +105,12 @@ data class MainUiState(
     val uiSurfaceAlpha: Float = 1f,
     val downloadMirrorBaseUrl: String = "",
     val prebuiltGkiEnabled: Boolean = true,
-    val predictiveBackEnabled: Boolean = true
+    val predictiveBackEnabled: Boolean = true,
+    val runtimeNavigationEnabled: Boolean = false,
+    val abkRuntimeStatus: AbkRuntimeStatus? = null,
+    val abkRuntimeLoading: Boolean = false,
+    val abkRuntimeError: String? = null,
+    val abkRuntimeModuleActionId: String? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -324,6 +331,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(pendingAutoDownloadRunId = runId) }
             }
         }
+        viewModelScope.launch {
+            prefs.runtimeNavigationEnabled.collect { enabled ->
+                _uiState.update { it.copy(runtimeNavigationEnabled = enabled) }
+            }
+        }
     }
 
     private fun registerStatusReceiver() {
@@ -370,6 +382,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             if (shouldAdvance) advanceStep()
+        }
+    }
+
+    fun setRuntimeNavigationEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(runtimeNavigationEnabled = enabled) }
+        viewModelScope.launch { prefs.setRuntimeNavigationEnabled(enabled) }
+        if (enabled) refreshAbkRuntimeStatus()
+    }
+
+    fun refreshAbkRuntimeStatus() {
+        if (!_uiState.value.rootGranted) {
+            _uiState.update {
+                it.copy(
+                    abkRuntimeStatus = null,
+                    abkRuntimeLoading = false,
+                    abkRuntimeError = "需要 Root 权限读取 /dev/abk_control"
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(abkRuntimeLoading = true, abkRuntimeError = null) }
+            val result = withContext(Dispatchers.IO) { RootUtils.readAbkControlStatus() }
+            if (result.success) {
+                val body = result.output.joinToString("\n").trim()
+                val runtimeStatus = runCatching {
+                    gson.fromJson(body, AbkRuntimeStatus::class.java)
+                }.getOrNull()
+                _uiState.update {
+                    if (runtimeStatus != null) {
+                        it.copy(
+                            abkRuntimeStatus = runtimeStatus,
+                            abkRuntimeLoading = false,
+                            abkRuntimeError = null
+                        )
+                    } else {
+                        it.copy(
+                            abkRuntimeStatus = null,
+                            abkRuntimeLoading = false,
+                            abkRuntimeError = "无法解析 /dev/abk_control 输出"
+                        )
+                    }
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        abkRuntimeStatus = null,
+                        abkRuntimeLoading = false,
+                        abkRuntimeError = result.output.joinToString("\n").ifBlank {
+                            "无法读取 /dev/abk_control"
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    fun setAbkRuntimeModuleEnabled(moduleId: String, enabled: Boolean) {
+        val cleanId = moduleId.trim()
+        if (cleanId.isBlank() || _uiState.value.abkRuntimeModuleActionId != null) return
+        if (!_uiState.value.rootGranted) {
+            _uiState.update { it.copy(abkRuntimeError = "需要 Root 权限写入 /dev/abk_control") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(abkRuntimeModuleActionId = cleanId, abkRuntimeError = null) }
+            val command = if (enabled) "enable $cleanId" else "disable $cleanId"
+            val result = withContext(Dispatchers.IO) { RootUtils.writeAbkControlCommand(command) }
+            if (!result.success) {
+                _uiState.update {
+                    it.copy(
+                        abkRuntimeModuleActionId = null,
+                        abkRuntimeError = result.output.joinToString("\n").ifBlank {
+                            "模块控制命令执行失败"
+                        }
+                    )
+                }
+            } else {
+                _uiState.update { it.copy(abkRuntimeModuleActionId = null) }
+                refreshAbkRuntimeStatus()
+            }
         }
     }
 

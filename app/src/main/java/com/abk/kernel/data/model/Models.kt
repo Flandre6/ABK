@@ -369,6 +369,40 @@ data class KernelBuildConfig(
     val customExternalModules: List<CustomExternalModule> = emptyList()
 )
 
+data class AbkRuntimeStatus(
+    val schema: Int = 1,
+    @SerializedName("abk_version") val abkVersion: String = "",
+    @SerializedName("abk_commit") val abkCommit: String = "",
+    val build: AbkRuntimeBuildInfo? = null,
+    val modules: List<AbkRuntimeModule> = emptyList()
+)
+
+data class AbkRuntimeBuildInfo(
+    @SerializedName("android_version") val androidVersion: String = "",
+    @SerializedName("kernel_version") val kernelVersion: String = "",
+    @SerializedName("sub_level") val subLevel: String = "",
+    @SerializedName("os_patch_level") val osPatchLevel: String = "",
+    val revision: String = "",
+    @SerializedName("kernelsu_variant") val kernelsuVariant: String = "",
+    @SerializedName("kernelsu_branch") val kernelsuBranch: String = "",
+    val version: String = "",
+    @SerializedName("build_time") val buildTime: String = "",
+    @SerializedName("virtualization_support") val virtualizationSupport: String = "",
+    @SerializedName("zram_extra_algos") val zramExtraAlgos: String = "",
+    val features: Map<String, Boolean> = emptyMap()
+)
+
+data class AbkRuntimeModule(
+    val id: String = "",
+    val name: String = "",
+    val version: String = "",
+    val description: String = "",
+    @SerializedName("repo_url") val repoUrl: String = "",
+    val stage: String = "",
+    val controllable: Boolean = false,
+    val enabled: Boolean = true
+)
+
 data class BuildPlan(
     val id: String = "",
     val name: String = "",
