@@ -77,6 +77,7 @@ private const val BUILD_PLAN_BACK_VISUAL_EXPONENT = 1.8f
 private const val BUILD_PLAN_BACK_SCALE_DELTA = 0.09f
 private const val BUILD_PLAN_BACK_SCRIM_ALPHA = 0.32f
 private const val BUILD_PLAN_PAGE_EXIT_DELAY_MS = 280L
+private const val CATALOG_MODULE_REMOVE_DELAY_MS = 260L
 private val BUILD_PLAN_BACK_MAX_OFFSET = 56.dp
 private val BUILD_PLAN_BACK_MAX_CORNER = 32.dp
 
@@ -138,7 +139,7 @@ fun BuildScreen(
     var deletePlanTarget by remember { mutableStateOf<BuildPlan?>(null) }
     var customModuleUrl by remember { mutableStateOf("") }
     var customModuleStage by remember { mutableStateOf(CustomExternalModuleStage.AFTER_PATCH) }
-    var recentlyRemovedCatalogModuleKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var removingCatalogModuleKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val coroutineScope = rememberCoroutineScope()
     val catalogModules = remember(state.moduleCatalogRepositories) {
         mergeBuildCatalogModules(state.moduleCatalogRepositories)
@@ -146,28 +147,14 @@ fun BuildScreen(
     val catalogModuleByUrl = remember(catalogModules) {
         catalogModules.associateBy { it.module.repoUrl.trim().lowercase() }
     }
-    val catalogSelections = remember(config.customExternalModules, catalogModuleByUrl, recentlyRemovedCatalogModuleKeys) {
-        val added = config.customExternalModules.mapNotNull { customModule ->
+    val catalogSelections = remember(config.customExternalModules, catalogModuleByUrl) {
+        config.customExternalModules.mapNotNull { customModule ->
             val catalogModule = catalogModuleByUrl[customModule.url.trim().lowercase()] ?: return@mapNotNull null
             BuildCatalogSelection(
                 catalogModule = catalogModule,
-                stage = CustomExternalModuleStage.normalize(customModule.stage),
-                added = true
+                stage = CustomExternalModuleStage.normalize(customModule.stage)
             )
         }.distinctBy { it.key }
-        val addedKeys = added.map { it.key }.toSet()
-        val removed = recentlyRemovedCatalogModuleKeys.mapNotNull { key ->
-            if (key in addedKeys) return@mapNotNull null
-            val url = key.substringBefore('|')
-            val stage = key.substringAfter('|', CustomExternalModuleStage.AFTER_PATCH)
-            val catalogModule = catalogModuleByUrl[url] ?: return@mapNotNull null
-            BuildCatalogSelection(
-                catalogModule = catalogModule,
-                stage = CustomExternalModuleStage.normalize(stage),
-                added = false
-            )
-        }
-        added + removed
     }
 
     LaunchedEffect(config, rawConfig) {
@@ -613,33 +600,42 @@ fun BuildScreen(
                             catalogSelections.forEach { selection ->
                                 val merged = selection.catalogModule
                                 val module = merged.module
-                                ExpressiveListItem(
-                                    title = module.catalogModuleTitle(),
-                                    subtitle = buildString {
-                                        append("${selection.stage} · 来源 ${merged.sources.joinToString(", ")}")
-                                        if (module.version.isNotBlank()) append(" · v${module.version}")
-                                        appendLine()
-                                        append(module.description.ifBlank { module.repoUrl })
-                                    },
-                                    leadingIcon = if (selection.added) Icons.Default.CheckCircle else Icons.Default.Extension,
-                                    trailingContent = {
-                                        TextButton(
-                                            onClick = {
-                                                if (selection.added) {
-                                                    vm.removeCustomExternalModule(module.repoUrl, selection.stage)
-                                                    recentlyRemovedCatalogModuleKeys =
-                                                        (recentlyRemovedCatalogModuleKeys + selection.key).distinct()
-                                                } else {
-                                                    vm.addModuleFromCatalog(module, selection.stage)
-                                                    recentlyRemovedCatalogModuleKeys =
-                                                        recentlyRemovedCatalogModuleKeys - selection.key
+                                key(selection.key) {
+                                    AnimatedVisibility(
+                                        visible = selection.key !in removingCatalogModuleKeys,
+                                        enter = fadeIn() + expandVertically(),
+                                        exit = fadeOut() + shrinkVertically()
+                                    ) {
+                                        ExpressiveListItem(
+                                            title = module.catalogModuleTitle(),
+                                            subtitle = buildString {
+                                                append("${selection.stage} · 来源 ${merged.sources.joinToString(", ")}")
+                                                if (module.version.isNotBlank()) append(" · v${module.version}")
+                                                appendLine()
+                                                append(module.description.ifBlank { module.repoUrl })
+                                            },
+                                            leadingIcon = Icons.Default.CheckCircle,
+                                            trailingContent = {
+                                                TextButton(
+                                                    onClick = {
+                                                        if (selection.key in removingCatalogModuleKeys) return@TextButton
+                                                        removingCatalogModuleKeys =
+                                                            (removingCatalogModuleKeys + selection.key).distinct()
+                                                        coroutineScope.launch {
+                                                            delay(CATALOG_MODULE_REMOVE_DELAY_MS)
+                                                            vm.removeCustomExternalModule(module.repoUrl, selection.stage)
+                                                            removingCatalogModuleKeys =
+                                                                removingCatalogModuleKeys - selection.key
+                                                        }
+                                                    },
+                                                    enabled = selection.key !in removingCatalogModuleKeys
+                                                ) {
+                                                    Text("移除")
                                                 }
                                             }
-                                        ) {
-                                            Text(if (selection.added) "移除" else "加入")
-                                        }
+                                        )
                                     }
-                                )
+                                }
                             }
                         }
 
@@ -1516,8 +1512,7 @@ private data class BuildCatalogModule(
 
 private data class BuildCatalogSelection(
     val catalogModule: BuildCatalogModule,
-    val stage: String,
-    val added: Boolean
+    val stage: String
 ) {
     val key: String = "${catalogModule.module.repoUrl.trim().lowercase()}|${CustomExternalModuleStage.normalize(stage)}"
 }
