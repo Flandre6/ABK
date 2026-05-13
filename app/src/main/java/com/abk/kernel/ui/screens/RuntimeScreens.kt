@@ -33,6 +33,7 @@ import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
 import com.abk.kernel.ui.components.ExpressiveTopBar
 import com.abk.kernel.ui.theme.uiSurfaceColor
+import com.abk.kernel.utils.RootUtils
 import com.abk.kernel.viewmodel.MainViewModel
 
 @Composable
@@ -230,6 +231,7 @@ private fun RuntimeStatusHeader(
 @Composable
 private fun RuntimeBuildParametersCard(runtimeStatus: AbkRuntimeStatus) {
     val build = runtimeStatus.build
+    val systemKernelVersion = remember { RootUtils.getKernelVersion() }
     ExpressiveSectionCard(
         title = "当前内核编译参数",
         subtitle = "来自管理器运行态信息",
@@ -250,7 +252,7 @@ private fun RuntimeBuildParametersCard(runtimeStatus: AbkRuntimeStatus) {
             RuntimeInfoRow("补丁级别", build.osPatchLevel)
             RuntimeInfoRow("修订版本", build.revision)
             RuntimeInfoRow("KSU", listOf(build.kernelsuVariant, build.kernelsuBranch).filter { it.isNotBlank() }.joinToString(" / "))
-            RuntimeInfoRow("内核版本名", build.version)
+            RuntimeInfoRow("内核版本", systemKernelVersion)
             RuntimeInfoRow("构建时间", build.buildTime)
             RuntimeInfoRow("虚拟化", build.virtualizationSupport)
             RuntimeInfoRow("ZRAM 额外算法", build.zramExtraAlgos)
