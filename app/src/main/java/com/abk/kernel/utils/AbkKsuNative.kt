@@ -15,13 +15,12 @@ object AbkKsuNative {
     val loaded: Boolean
         get() = libraryLoaded
 
-    external val version: Int
-    external val isSafeMode: Boolean
-    external val isLkmMode: Boolean
-    external val isLateLoadMode: Boolean
-    external val isManager: Boolean
-    external val isPrBuild: Boolean
-
+    external fun getVersion(): Int
+    external fun isSafeMode(): Boolean
+    external fun isLkmMode(): Boolean
+    external fun isLateLoadMode(): Boolean
+    external fun isManager(): Boolean
+    external fun isPrBuild(): Boolean
     external fun getFullVersion(): String
     external fun getHookType(): String
     external fun getSuperuserCount(): Int
@@ -39,17 +38,17 @@ object AbkKsuNative {
     fun status(): NativeStatus? {
         if (!libraryLoaded) return null
         return runCatching {
-            val kernelVersion = version
+            val kernelVersion = getVersion()
             if (kernelVersion <= 0) return null
             NativeStatus(
                 version = kernelVersion,
                 fullVersion = getFullVersion().trim(),
                 hookType = getHookType().trim(),
-                isManager = isManager,
-                isSafeMode = isSafeMode,
-                isLkmMode = isLkmMode,
-                isLateLoadMode = isLateLoadMode,
-                isPrBuild = isPrBuild,
+                isManager = isManager(),
+                isSafeMode = isSafeMode(),
+                isLkmMode = isLkmMode(),
+                isLateLoadMode = isLateLoadMode(),
+                isPrBuild = isPrBuild(),
                 superuserCount = getSuperuserCount()
             )
         }.getOrNull()
