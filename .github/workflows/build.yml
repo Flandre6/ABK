@@ -842,6 +842,7 @@ jobs:
 
           root = Path(".")
           marker = "ABK_MANAGER_OFFICIAL_CERT"
+          source_cert_marker = "ABK_MANAGER_CERT_SHA256"
 
           for kbuild in root.rglob("Kbuild"):
               text = kbuild.read_text(errors="ignore")
@@ -865,38 +866,74 @@ jobs:
           direct_snippet = """#ifdef ABK_MANAGER_OFFICIAL_CERT
               if (check_v2_signature(path, ABK_MANAGER_CERT_SIZE, ABK_MANAGER_CERT_SHA256)) {
                       return true;
-              }}
+              }
           #endif
           """
+          package_gate_pattern = re.compile(
+              r"(?P<indent>[ \t]*)if \(strncmp\(pkg, KSU_MANAGER_PACKAGE, sizeof\(KSU_MANAGER_PACKAGE\)\)\) \{\n"
+              r"(?P=indent)[ \t]+return false;\n"
+              r"(?P=indent)\}"
+          )
+
+          def package_gate_replacement(match):
+              indent = match.group("indent")
+              inner = indent + "    "
+              return (
+                  f"{indent}if (strncmp(pkg, KSU_MANAGER_PACKAGE, sizeof(KSU_MANAGER_PACKAGE))) {{\n"
+                  "#ifdef ABK_MANAGER_OFFICIAL_CERT\n"
+                  f"{inner}if (strncmp(pkg, ABK_MANAGER_PACKAGE, sizeof(ABK_MANAGER_PACKAGE))) {{\n"
+                  f"{inner}    return false;\n"
+                  f"{inner}}}\n"
+                  "#else\n"
+                  f"{inner}return false;\n"
+                  "#endif\n"
+                  f"{indent}}}"
+              )
 
           for source in root.rglob("apk_sign.c"):
               text = source.read_text(errors="ignore")
-              if marker in text or "bool is_manager_apk" not in text:
+              if "bool is_manager_apk" not in text:
                   continue
+              changed = False
+
+              if "ABK_MANAGER_PACKAGE" not in text:
+                  text, replacements = package_gate_pattern.subn(package_gate_replacement, text, count=1)
+                  if replacements:
+                      changed = True
+
+              if source_cert_marker in text:
+                  if changed:
+                      source.write_text(text)
+                      print(f"Injected ABK official manager package gate in {source}")
+                  else:
+                      print(f"ABK official manager certificate already exists in {source}")
+                  injected += 1
+                  continue
+
               if "static apk_sign_key_t apk_sign_keys[] = {" in text:
                   array_start = text.find("static apk_sign_key_t apk_sign_keys[] = {")
                   array_end = text.find("};", array_start)
                   if array_end < 0:
                       continue
                   text = text[:array_end] + array_snippet + text[array_end:]
+                  changed = True
                   source.write_text(text)
                   injected += 1
-                  print(f"Injected ABK official certificate key in {source}")
+                  print(f"Injected ABK official certificate key/package gate in {source}")
                   continue
               if "check_v2_signature(char *path, unsigned expected_size, const char *expected_sha256)" not in text:
                   continue
-              anchor = "bool is_manager_apk(char *path)"
-              if anchor not in text:
-                  anchor = "bool is_manager_apk(char *path, u8 *signature_index)"
-              if anchor not in text:
+              direct_anchor = """    if (check_v2_signature(path, EXPECTED_SIZE, EXPECTED_HASH)) {
+                  return true;
+              }
+          """
+              if direct_anchor not in text:
                   continue
-              body = anchor + "\n{"
-              if body not in text:
-                  continue
-              text = text.replace(body, body + "\n" + direct_snippet, 1)
+              text = text.replace(direct_anchor, direct_anchor + direct_snippet, 1)
+              changed = True
               source.write_text(text)
               injected += 1
-              print(f"Injected ABK official certificate check in {source}")
+              print(f"Injected ABK official certificate check/package gate in {source}")
 
           if injected == 0:
               raise SystemExit("未找到可注入的 KernelSU manager/apk_sign.c")
@@ -2507,6 +2544,153 @@ jobs:
           if [ "$executed" -eq 0 ]; then
             echo "没有配置 $CUSTOM_EXTERNAL_MODULE_STAGE 阶段的自定义外部模块。"
           fi
+
+      - name: 接入 ABK Control 到 KernelSU supercall
+        if: inputs.ksu_variant == 'Official' || inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'ReSukiSU'
+        working-directory: ${{ env.KERNEL_ROOT }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          root = Path(".")
+          marker = "ABK_CONTROL_SUPERCALL_BRIDGE"
+
+          control_headers = [
+              path for path in root.rglob("include/linux/abk_control.h")
+              if "abk_control.h" == path.name
+          ]
+          if not control_headers:
+              print("未检测到 ABK Control 头文件，跳过 supercall 桥接。")
+              raise SystemExit(0)
+
+          include_snippet = """#ifdef CONFIG_ABK_CONTROL
+          #include <linux/abk_control.h>
+          #endif
+          """
+          handler_snippet = """
+          #ifdef CONFIG_ABK_CONTROL
+          /* ABK_CONTROL_SUPERCALL_BRIDGE */
+          static int do_abk_control_get_status(void __user *arg)
+          {
+              struct abk_control_status_cmd cmd;
+              char *json = NULL;
+              size_t json_len = 0;
+              u64 user_data;
+              u64 user_len;
+              int ret;
+
+              if (copy_from_user(&cmd, arg, sizeof(cmd)))
+                  return -EFAULT;
+
+              user_data = cmd.data;
+              user_len = cmd.data_len;
+
+              ret = abk_control_get_status_json(&json, &json_len);
+              if (ret)
+                  return ret;
+
+              cmd.data_len = json_len;
+              if (!user_data || user_len < json_len) {
+                  ret = -ENOSPC;
+                  goto out;
+              }
+
+              if (json_len && copy_to_user((void __user *)(unsigned long)user_data, json, json_len)) {
+                  ret = -EFAULT;
+                  goto out_free;
+              }
+
+              ret = 0;
+          out:
+              if (copy_to_user(arg, &cmd, sizeof(cmd)))
+                  ret = -EFAULT;
+          out_free:
+              kfree(json);
+              return ret;
+          }
+
+          static int do_abk_control_run_command(void __user *arg)
+          {
+              struct abk_control_command_cmd cmd;
+              char command[ABK_CONTROL_MAX_COMMAND];
+
+              if (copy_from_user(&cmd, arg, sizeof(cmd)))
+                  return -EFAULT;
+              if (!cmd.command || cmd.command_len == 0 || cmd.command_len > ABK_CONTROL_MAX_COMMAND)
+                  return -EINVAL;
+              if (copy_from_user(command, (void __user *)(unsigned long)cmd.command, cmd.command_len))
+                  return -EFAULT;
+
+              return abk_control_run_command(command, cmd.command_len);
+          }
+          #endif
+
+          """
+          entry_snippet = """#ifdef CONFIG_ABK_CONTROL
+              {
+                  .cmd = ABK_CONTROL_IOCTL_GET_STATUS,
+                  .name = "ABK_CONTROL_GET_STATUS",
+                  .handler = do_abk_control_get_status,
+                  .perm_check = manager_or_root
+              },
+              {
+                  .cmd = ABK_CONTROL_IOCTL_RUN_COMMAND,
+                  .name = "ABK_CONTROL_RUN_COMMAND",
+                  .handler = do_abk_control_run_command,
+                  .perm_check = manager_or_root
+              },
+          #endif
+          """
+
+          candidates = []
+          for source in root.rglob("dispatch.c"):
+              normalized = source.as_posix()
+              if "/supercall/" not in normalized:
+                  continue
+              text = source.read_text(errors="ignore")
+              if "ksu_ioctl_handlers" not in text or "ksu_supercall_handle_ioctl" not in text:
+                  continue
+              candidates.append(source)
+
+          if not candidates:
+              raise SystemExit("已检测到 ABK Control，但未找到 KernelSU supercall/dispatch.c，无法桥接私有控制接口。")
+
+          injected = 0
+          for source in candidates:
+              text = source.read_text(errors="ignore")
+              if marker in text:
+                  print(f"ABK Control supercall bridge already exists in {source}")
+                  injected += 1
+                  continue
+
+              if "<linux/abk_control.h>" not in text:
+                  if "#include <linux/version.h>\n" in text:
+                      text = text.replace("#include <linux/version.h>\n", "#include <linux/version.h>\n" + include_snippet, 1)
+                  elif "#include <linux/uaccess.h>\n" in text:
+                      text = text.replace("#include <linux/uaccess.h>\n", "#include <linux/uaccess.h>\n" + include_snippet, 1)
+                  else:
+                      raise SystemExit(f"{source} 缺少可用 include 注入锚点")
+
+              handler_anchor = "// IOCTL handlers mapping table"
+              if handler_anchor not in text:
+                  raise SystemExit(f"{source} 缺少 ioctl handler 表锚点")
+              text = text.replace(handler_anchor, handler_snippet + handler_anchor, 1)
+
+              sentinel = re.search(r"\n\s*\{\s*\n\s*\.cmd\s*=\s*0\s*,", text)
+              if not sentinel:
+                  raise SystemExit(f"{source} 缺少 ioctl handler sentinel")
+              text = text[:sentinel.start() + 1] + entry_snippet + text[sentinel.start() + 1:]
+
+              source.write_text(text)
+              injected += 1
+              print(f"Injected ABK Control supercall bridge in {source}")
+
+          if injected == 0:
+              raise SystemExit("未完成 ABK Control supercall bridge 注入")
+          PY
 
       - name: 修复 Official SUSFS 源码兼容
         if: inputs.ksu_variant == 'Official' && inputs.enable_susfs
