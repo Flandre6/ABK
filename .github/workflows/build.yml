@@ -1275,6 +1275,9 @@ jobs:
                 if [[ "${{ inputs.ksu_variant }}" == "SukiSU" && "${{ inputs.use_bbg }}" == "true" ]]; then
                   fix_proc_base_missing_vma_decl
                 fi
+                if [[ "${{ inputs.ksu_variant }}" == "Official" && "${{ inputs.use_bbg }}" == "true" && "$CURRENT_SUB" -eq 43 ]]; then
+                  fix_proc_base_missing_vma_decl
+                fi
                 if [[ "${{ inputs.ksu_variant }}" == "ReSukiSU" && "$CURRENT_SUB" -eq 43 ]]; then
                   fix_proc_base_missing_vma_decl
                 fi
