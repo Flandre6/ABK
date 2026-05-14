@@ -20,6 +20,10 @@
 #include <vector>
 #include "abk_ksu.h"
 
+#ifndef SYS_reboot
+#define SYS_reboot __NR_reboot
+#endif
+
 static int fd = -1;
 
 static inline int scan_driver_fd() {
@@ -65,16 +69,39 @@ static inline int scan_driver_fd() {
     return found;
 }
 
-template<typename... Args>
-static int ksuctl(unsigned long op, Args &&... args) {
+static inline int install_driver_fd() {
+    int installed_fd = -1;
 
+    syscall(SYS_reboot, KSU_INSTALL_MAGIC1, KSU_INSTALL_MAGIC2, 0, &installed_fd);
+    if (installed_fd >= 0) {
+        return installed_fd;
+    }
+
+    return scan_driver_fd();
+}
+
+static inline int ensure_driver_fd() {
     if (fd < 0) {
         fd = scan_driver_fd();
     }
+    if (fd < 0) {
+        fd = install_driver_fd();
+    }
+    return fd;
+}
 
+template<typename... Args>
+static int ksuctl(unsigned long op, Args &&... args) {
     static_assert(sizeof...(Args) <= 1, "ioctl expects at most one extra argument");
 
-    return ioctl(fd, op, std::forward<Args>(args)...);
+    int current_fd = ensure_driver_fd();
+    int ret = ioctl(current_fd, op, std::forward<Args>(args)...);
+    if (ret < 0 && errno == EBADF) {
+        fd = -1;
+        current_fd = ensure_driver_fd();
+        ret = ioctl(current_fd, op, std::forward<Args>(args)...);
+    }
+    return ret;
 }
 
 static struct ksu_get_info_cmd g_version {};
