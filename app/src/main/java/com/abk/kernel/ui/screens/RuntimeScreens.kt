@@ -101,6 +101,7 @@ fun RuntimeHomeScreen(
             RuntimeStatusHeader(
                 runtimeStatus = state.abkRuntimeStatus,
                 loading = state.abkRuntimeLoading,
+                error = state.abkRuntimeError,
                 onRefresh = vm::refreshAbkRuntimeStatus
             )
 
@@ -240,7 +241,7 @@ fun InstalledModulesScreen(vm: MainViewModel) {
 
             state.abkRuntimeError?.let {
                 RuntimeErrorCard(
-                    message = if (state.abkRuntimeStatus == null) "管理器未激活" else "操作未完成，请刷新后重试",
+                    message = if (state.abkRuntimeStatus == null) it else "操作未完成，请刷新后重试",
                     onRefresh = vm::refreshAbkRuntimeStatus
                 )
             }
@@ -317,6 +318,7 @@ fun InstalledModulesScreen(vm: MainViewModel) {
 private fun RuntimeStatusHeader(
     runtimeStatus: AbkRuntimeStatus?,
     loading: Boolean,
+    error: String?,
     onRefresh: () -> Unit
 ) {
     ExpressiveHeroCard(
@@ -324,8 +326,8 @@ private fun RuntimeStatusHeader(
         subtitle = runtimeStatus?.let {
             val managerName = it.manager?.displayName?.takeIf { name -> name.isNotBlank() } ?: "Root"
             "$managerName · ABK ${it.abkVersion.ifBlank { "unknown" }} · ${it.modules.size} 个模块"
-        } ?: "安装并启用支持管理器的内核后可查看运行态信息",
-        icon = if (runtimeStatus != null) Icons.Default.CheckCircle else Icons.Default.Memory,
+        } ?: (error ?: "安装并启用支持管理器的内核后可查看运行态信息"),
+        icon = if (runtimeStatus != null) Icons.Default.CheckCircle else Icons.Default.Error,
         containerColor = if (runtimeStatus != null) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
@@ -389,6 +391,16 @@ private fun RuntimeManagerCard(runtimeStatus: AbkRuntimeStatus) {
                 RuntimeInfoRow("运行后端", backend.displayName.ifBlank { backend.variant })
                 RuntimeInfoRow("后端版本", backend.version)
                 RuntimeInfoRow("兼容层", runtimeBackendLabel(backend.backend))
+            }
+            val diagnostics = manager.diagnostics
+                .plus(backend?.diagnostics.orEmpty())
+                .distinct()
+            diagnostics.forEach { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
             val chips = manager.capabilities
                 .plus(backend?.capabilities.orEmpty())
