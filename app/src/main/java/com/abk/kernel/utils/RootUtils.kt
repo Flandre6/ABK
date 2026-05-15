@@ -1025,8 +1025,24 @@ object RootUtils {
     }
 
     private fun detectManagerRuntime(): ManagerRuntimeProbe {
-        detectNativeManagerRuntime()?.let { return it }
+        val nativeRuntime = detectNativeManagerRuntime()
+        if (nativeRuntime?.active == true) {
+            return nativeRuntime
+        }
 
+        val shellRuntime = detectShellManagerRuntime(nativeRuntime)
+        if (shellRuntime != null) {
+            return shellRuntime
+        }
+
+        return nativeRuntime ?: ManagerRuntimeProbe(
+            diagnostics = listOf("未检测到可用的 KernelSU/ReSukiSU 管理器接口或 Root shell。")
+        )
+    }
+
+    private fun detectShellManagerRuntime(
+        nativeRuntime: ManagerRuntimeProbe?
+    ): ManagerRuntimeProbe? {
         return try {
             createRootShell(timeoutSeconds = 10L).use { shell ->
                 val ksudPath = execWithShell(
@@ -1064,17 +1080,18 @@ object RootUtils {
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .distinct()
-                    val variant = inferManagerVariant(version)
+                    val variant = inferManagerVariant(version).ifBlank { "KernelSU" }
                     ManagerRuntimeProbe(
                         active = true,
-                        displayName = variant.ifBlank { "KernelSU" },
-                        variant = variant.ifBlank { "KernelSU" },
+                        displayName = nativeRuntime?.displayName?.takeIf { it.isNotBlank() } ?: variant,
+                        variant = nativeRuntime?.variant?.takeIf { it.isNotBlank() } ?: variant,
                         backend = "ksud",
-                        version = version,
+                        version = version.ifBlank { nativeRuntime?.version.orEmpty() },
                         capabilities = capabilities.ifEmpty { listOf("root_shell", "modules") },
-                        diagnostics = listOf(
-                            "当前仅通过 ksud/root shell 兼容层工作，ABK 尚未被内核识别为原生管理器，无法管理 Root 授权策略。"
-                        )
+                        diagnostics = (
+                            nativeRuntime?.diagnostics.orEmpty() +
+                                "当前仅通过 ksud/root shell 兼容层工作，ABK 尚未被内核识别为原生管理器，无法管理 Root 授权策略。"
+                            ).distinct()
                     )
                 } else {
                     ManagerRuntimeProbe(
@@ -1083,16 +1100,15 @@ object RootUtils {
                         variant = "Generic",
                         backend = "su",
                         capabilities = listOf("root_shell"),
-                        diagnostics = listOf(
-                            "当前仅有通用 su shell 可用，未检测到 KernelSU/ReSukiSU 原生管理器接口。"
-                        )
+                        diagnostics = (
+                            nativeRuntime?.diagnostics.orEmpty() +
+                                "当前仅有通用 su shell 可用，未检测到 KernelSU/ReSukiSU 原生管理器接口。"
+                            ).distinct()
                     )
                 }
             }
         } catch (error: Throwable) {
-            ManagerRuntimeProbe(
-                diagnostics = listOf("未检测到可用的 KernelSU/ReSukiSU 管理器接口或 Root shell。")
-            )
+            null
         }
     }
 

@@ -464,9 +464,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(abkRuntimeLoading = true, abkRuntimeError = null) }
             val (runtimeStatus, runtimeError) = withContext(Dispatchers.IO) {
-                if (!RootUtils.isNativeManagerActive()) {
-                    RootUtils.refreshRootState()
-                }
                 val snapshot = RootUtils.readManagerRuntimeSnapshot()
                 if (!snapshot.manager.active) {
                     null to snapshot.manager.diagnostics.firstOrNull()
@@ -481,7 +478,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 if (runtimeStatus != null) {
                     it.copy(
-                        rootGranted = true,
                         abkRuntimeStatus = runtimeStatus,
                         abkRuntimeLoading = false,
                         abkRuntimeError = null
