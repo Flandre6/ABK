@@ -77,7 +77,8 @@ private val THEME_BACK_MAX_CORNER = 32.dp
 fun SettingsScreen(
     vm: MainViewModel,
     outerPadding: PaddingValues = PaddingValues(0.dp),
-    onThemePageVisibleChange: (Boolean) -> Unit = {}
+    onThemePageVisibleChange: (Boolean) -> Unit = {},
+    onOpenInstalledModules: () -> Unit = {}
 ) {
     val state by vm.uiState.collectAsState()
     val context = LocalContext.current
@@ -221,6 +222,7 @@ fun SettingsScreen(
                 onOpenThemeSettings = ::openThemeSettings,
                 onOpenAppProfileTemplates = ::openAppProfileTemplates,
                 onOpenManagerTools = ::openManagerTools,
+                onOpenInstalledModules = onOpenInstalledModules,
                 onAbout = { showAboutDialog = true }
             )
         }
@@ -451,6 +453,7 @@ private fun SettingsMainContent(
     onOpenThemeSettings: () -> Unit,
     onOpenAppProfileTemplates: () -> Unit,
     onOpenManagerTools: () -> Unit,
+    onOpenInstalledModules: () -> Unit,
     onAbout: () -> Unit
 ) {
     Column(
@@ -522,7 +525,8 @@ private fun SettingsMainContent(
             state = state,
             vm = vm,
             onOpenAppProfileTemplates = onOpenAppProfileTemplates,
-            onOpenManagerTools = onOpenManagerTools
+            onOpenManagerTools = onOpenManagerTools,
+            onOpenInstalledModules = onOpenInstalledModules
         )
 
         SettingsGroup(title = stringResource(R.string.settings_notification)) {
@@ -579,7 +583,8 @@ private fun ManagerInjectedSettingsGroup(
     state: MainUiState,
     vm: MainViewModel,
     onOpenAppProfileTemplates: () -> Unit,
-    onOpenManagerTools: () -> Unit
+    onOpenManagerTools: () -> Unit,
+    onOpenInstalledModules: () -> Unit
 ) {
     val hasInjectedSettings = state.managerSettingsItems.isNotEmpty()
     if (!hasInjectedSettings && !state.managerSettingsLoading && state.managerSettingsError == null) return
@@ -620,6 +625,7 @@ private fun ManagerInjectedSettingsGroup(
                         when (item.id) {
                             "app_profile_templates" -> onOpenAppProfileTemplates()
                             "manager_tools" -> onOpenManagerTools()
+                            "kpm" -> onOpenInstalledModules()
                         }
                     }
                 )

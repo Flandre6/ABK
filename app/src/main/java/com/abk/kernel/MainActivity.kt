@@ -519,7 +519,11 @@ private fun AbkMainScaffold(
                     AbkTab.Settings -> SettingsScreen(
                         vm = vm,
                         outerPadding = contentPadding,
-                        onThemePageVisibleChange = { settingsThemePageVisible = it }
+                        onThemePageVisibleChange = { settingsThemePageVisible = it },
+                        onOpenInstalledModules = {
+                            if (!state.runtimeNavigationEnabled) vm.setRuntimeNavigationEnabled(true)
+                            selectedTab = AbkTab.InstalledModules
+                        }
                     )
                 }
             }

@@ -2572,8 +2572,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun buildReSukiSuSettings(): List<ManagerSettingItem> {
         val suCompat = RootUtils.readKsuFeature("su_compat")
         val kernelUmount = RootUtils.readKsuFeature("kernel_umount")
+        val kpmAvailable = RootUtils.isKpmAvailable()
         val sulog = RootUtils.readKsuFeature("sulog")
         val adbRoot = RootUtils.readKsuFeature("adb_root")
+        val selinuxHide = RootUtils.readKsuFeature("selinux_hide")
         val nativeProfileAvailable = RootUtils.isNativeManagerActive()
         val suCurrentEnabled = suCompat.value != 0L
         val suCompatMode = when {
@@ -2612,6 +2614,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     status = kernelUmount.toManagerSettingStatus()
                 )
             )
+            if (kpmAvailable) {
+                add(
+                    ManagerSettingItem(
+                        id = MANAGER_SETTING_KPM,
+                        title = "KPM",
+                        subtitle = "使用 KPM 管理内核模块",
+                        kind = ManagerSettingKind.NAVIGATION
+                    )
+                )
+            }
+            if (selinuxHide.support == RootUtils.KsuFeatureSupport.SUPPORTED) {
+                add(
+                    ManagerSettingItem(
+                        id = MANAGER_SETTING_SELINUX_HIDE,
+                        title = "隐藏 SELinux 修改",
+                        subtitle = featureSubtitle(selinuxHide, "阻止应用检测 SELinux 修改", "ReSukiSU"),
+                        checked = selinuxHide.value != 0L,
+                        enabled = true,
+                        status = selinuxHide.toManagerSettingStatus()
+                    )
+                )
+            }
             if (Build.VERSION.SDK_INT > Build.VERSION_CODES.Q) {
                 add(
                     ManagerSettingItem(
@@ -2654,7 +2678,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         buildKernelSuFamilySettings(
             backendTitle = "KernelSU",
             includeTools = false,
-            includeKpm = false,
+            includeKpm = true,
             includeSelinuxHide = true,
             includeSulog = true,
             includeAdbRoot = true,
@@ -2667,8 +2691,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         buildKernelSuFamilySettings(
             backendTitle = "SukiSU",
             includeTools = true,
-            includeKpm = RootUtils.isKpmAvailable(),
-            includeSelinuxHide = false,
+            includeKpm = true,
+            includeSelinuxHide = true,
             includeSulog = false,
             includeAdbRoot = false,
             includeWebViewDebug = true,
@@ -2689,6 +2713,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ): List<ManagerSettingItem> {
         val suCompat = RootUtils.readKsuFeature("su_compat")
         val kernelUmount = RootUtils.readKsuFeature("kernel_umount")
+        val kpmAvailable = includeKpm && RootUtils.isKpmAvailable()
         val sulog = RootUtils.readKsuFeature("sulog")
         val adbRoot = RootUtils.readKsuFeature("adb_root")
         val selinuxHide = RootUtils.readKsuFeature("selinux_hide")
@@ -2718,7 +2743,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
-            if (includeKpm) {
+            if (kpmAvailable) {
                 add(
                     ManagerSettingItem(
                         id = MANAGER_SETTING_KPM,
