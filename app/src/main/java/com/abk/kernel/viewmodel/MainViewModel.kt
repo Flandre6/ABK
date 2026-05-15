@@ -3800,7 +3800,7 @@ private const val OFFICIAL_MODULE_CATALOG_ID = "official-abk-module-catalog"
 private const val OFFICIAL_MODULE_CATALOG_URL = "https://github.com/xingguangcuican6666/ABK_repo"
 
 private val BUILD_PLAN_KSU_VARIANTS = listOf("Official", "SukiSU", "ReSukiSU")
-private val BUILD_PLAN_KSU_BRANCHES = listOf("Stable(标准)", "Dev(开发)")
+private val BUILD_PLAN_KSU_BRANCHES = KSU_BRANCH_BUILD_PLAN_OPTIONS
 private val BUILD_PLAN_VIRTUALIZATION_OPTIONS = listOf("off", "on", "678", "123", "345")
 private val BUILD_PLAN_MODULE_STAGES = listOf(
     CustomExternalModuleStage.AFTER_PATCH,
@@ -4130,33 +4130,39 @@ private fun WorkflowRun.toBuildStatus(): BuildStatus = when (status) {
 }
 
 // Helper to convert KernelBuildConfig to workflow dispatch inputs map
-private fun KernelBuildConfig.toInputMap(): Map<String, String> = mapOf(
-    "android_version" to androidVersion,
-    "kernel_version" to kernelVersion,
-    "sub_level" to subLevel,
-    "os_patch_level" to osPatchLevel,
-    "revision" to revision,
-    "kernelsu_variant" to kernelsuVariant,
-    "kernelsu_branch" to kernelsuBranch.takeIf { it in setOf("Stable(标准)", "Dev(开发)") }.orEmpty()
-        .ifBlank { "Stable(标准)" },
-    "version" to version,
-    "build_time" to buildTime,
-    "use_zram" to useZram.toString(),
-    "use_bbg" to useBbg.toString(),
-    "use_ddk" to useDdk.toString(),
-    "use_ntsync" to useNtsync.toString(),
-    "use_networking" to useNetworking.toString(),
-    "use_kpm" to useKpm.toString(),
-    "use_rekernel" to useRekernel.toString(),
-    "cancel_susfs" to cancelSusfs.toString(),
-    "supp_op" to suppOp.toString(),
-    "zram_full_algo" to zramFullAlgo.toString(),
-    "zram_extra_algos" to zramExtraAlgos,
-    "kpm_password" to kpmPassword,
-    "virtualization_support" to virtualizationSupport,
-    "use_custom_external_modules" to useCustomExternalModules.toString(),
-    "custom_external_modules" to if (useCustomExternalModules) customExternalModules.toWorkflowInput() else ""
-)
+private fun KernelBuildConfig.toInputMap(): Map<String, String> {
+    val config = KernelSupport.normalize(this)
+    return mapOf(
+        "android_version" to config.androidVersion,
+        "kernel_version" to config.kernelVersion,
+        "sub_level" to config.subLevel,
+        "os_patch_level" to config.osPatchLevel,
+        "revision" to config.revision,
+        "kernelsu_variant" to config.kernelsuVariant,
+        "kernelsu_branch" to config.kernelsuBranch,
+        "version" to config.version,
+        "build_time" to config.buildTime,
+        "use_zram" to config.useZram.toString(),
+        "use_bbg" to config.useBbg.toString(),
+        "use_ddk" to config.useDdk.toString(),
+        "use_ntsync" to config.useNtsync.toString(),
+        "use_networking" to config.useNetworking.toString(),
+        "use_kpm" to config.useKpm.toString(),
+        "use_rekernel" to config.useRekernel.toString(),
+        "cancel_susfs" to config.cancelSusfs.toString(),
+        "supp_op" to config.suppOp.toString(),
+        "zram_full_algo" to config.zramFullAlgo.toString(),
+        "zram_extra_algos" to config.zramExtraAlgos,
+        "kpm_password" to config.kpmPassword,
+        "virtualization_support" to config.virtualizationSupport,
+        "use_custom_external_modules" to config.useCustomExternalModules.toString(),
+        "custom_external_modules" to if (config.useCustomExternalModules) {
+            config.customExternalModules.toWorkflowInput()
+        } else {
+            ""
+        }
+    )
+}
 
 private fun List<CustomExternalModule>?.toWorkflowInput(): String = this.orEmpty()
     .mapNotNull { module ->
