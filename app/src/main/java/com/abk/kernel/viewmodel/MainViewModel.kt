@@ -2783,7 +2783,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun RootUtils.ManagerRuntimeProbe.isOfficialKernelSu(): Boolean {
         val text = listOf(displayName, variant, version).joinToString(" ").lowercase()
-        return "kernelsu" in text
+        return "kernelsu" in text ||
+            "official" in text ||
+            (backend == "native" && "native_manager" in capabilities) ||
+            (backend == "ksud" && capabilities.any { it == "features" || it == "module_control" || it == "modules" })
     }
 
     private fun featureSubtitle(feature: RootUtils.KsuFeatureState, normal: String, backendTitle: String): String =
