@@ -15,6 +15,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -68,13 +69,32 @@ import kotlinx.coroutines.withContext
 @Composable
 fun RuntimeHomeScreen(
     vm: MainViewModel,
-    onSwitchToClassic: () -> Unit
+    onSwitchToClassic: () -> Unit,
+    onManagerPatchPageVisibleChange: (Boolean) -> Unit = {}
 ) {
     val state by vm.uiState.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+    var showManagerPatchPage by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(state.runtimeNavigationEnabled, state.rootGranted) {
         if (state.runtimeNavigationEnabled) vm.refreshAbkRuntimeStatus()
+    }
+
+    LaunchedEffect(showManagerPatchPage) {
+        onManagerPatchPageVisibleChange(showManagerPatchPage)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onManagerPatchPageVisibleChange(false) }
+    }
+
+    if (showManagerPatchPage) {
+        AbkRootPatchScreen(
+            rootGranted = state.rootGranted,
+            runtimeVariant = state.abkRuntimeStatus?.manager?.variant.orEmpty(),
+            onBack = { showManagerPatchPage = false }
+        )
+        return
     }
 
     Scaffold(
@@ -108,7 +128,10 @@ fun RuntimeHomeScreen(
                 runtimeStatus = state.abkRuntimeStatus,
                 loading = state.abkRuntimeLoading,
                 error = state.abkRuntimeError,
-                onRefresh = vm::refreshAbkRuntimeStatus
+                onRefresh = vm::refreshAbkRuntimeStatus,
+                onOpenManagerPatch = {
+                    if (state.abkRuntimeStatus != null) showManagerPatchPage = true
+                }
             )
 
             state.abkRuntimeStatus?.let { runtimeStatus ->
@@ -422,8 +445,14 @@ private fun RuntimeStatusHeader(
     runtimeStatus: AbkRuntimeStatus?,
     loading: Boolean,
     error: String?,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenManagerPatch: (() -> Unit)? = null
 ) {
+    val clickableModifier = if (runtimeStatus != null && onOpenManagerPatch != null) {
+        Modifier.clickable(onClick = onOpenManagerPatch)
+    } else {
+        Modifier
+    }
     ExpressiveHeroCard(
         title = if (runtimeStatus != null) "管理器已激活" else "管理器未激活",
         subtitle = runtimeStatus?.let {
@@ -441,6 +470,7 @@ private fun RuntimeStatusHeader(
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
+        modifier = clickableModifier,
         badge = {
             runtimeStatus?.let {
                 ExpressiveStatusChip(
