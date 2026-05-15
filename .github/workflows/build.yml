@@ -777,37 +777,41 @@ jobs:
         run: |
           branch_input="${{ inputs.ksu_branch }}"
           variant_input="${{ inputs.ksu_variant }}"
-          KSU_OFFICIAL_COMMIT="3f388ef137c78e1ca0c92c0ada3b8717cdcc4302"
-          SUKISU_COMMIT="a992f224f5ea5a69b56ba20e925379c9a226f2b2"
-          RESUKISU_COMMIT="3d790eaaabe9e7e33d938bbf836e0f247121e79e"
+          OFFICIAL_STABLE_REF="3f388ef137c78e1ca0c92c0ada3b8717cdcc4302"
+          SUKISU_STABLE_REF="a992f224f5ea5a69b56ba20e925379c9a226f2b2"
+          RESUKISU_STABLE_REF="3d790eaaabe9e7e33d938bbf836e0f247121e79e"
 
-          if [ "$variant_input" = "Official" ]; then
-            BRANCH="-s $KSU_OFFICIAL_COMMIT"
-          elif [ "$variant_input" = "SukiSU" ]; then
-            BRANCH="-s $SUKISU_COMMIT"
-          elif [ "$variant_input" = "ReSukiSU" ]; then
-            BRANCH="$RESUKISU_COMMIT"
-          else
-            case "$branch_input" in
-              "Stable(标准)")
-                case "$variant_input" in
-                  "Next") ;;
-                  *) BRANCH="-" ;;
-                esac
-                ;;
-              "Dev(开发)")
-                case "$variant_input" in
-                  "Next") ;;
-                  *) echo "未知变体: $variant_input" >&2; exit 1 ;;
-                esac
-                ;;
-              *)
-                echo "未知分支: $branch_input" >&2
-                exit 1
-                ;;
-            esac
+          # Dev 固定引用先完整复制 Stable 配置，后续只改这里的 *_DEV_REF 即可。
+          OFFICIAL_DEV_REF="$OFFICIAL_STABLE_REF"
+          SUKISU_DEV_REF="$SUKISU_STABLE_REF"
+          RESUKISU_DEV_REF="$RESUKISU_STABLE_REF"
 
-          fi
+          case "$branch_input" in
+            "Stable(标准)")
+              OFFICIAL_REF="$OFFICIAL_STABLE_REF"
+              SUKISU_REF="$SUKISU_STABLE_REF"
+              RESUKISU_REF="$RESUKISU_STABLE_REF"
+              NEXT_BRANCH="dev_susfs"
+              ;;
+            "Dev(开发)")
+              OFFICIAL_REF="$OFFICIAL_DEV_REF"
+              SUKISU_REF="$SUKISU_DEV_REF"
+              RESUKISU_REF="$RESUKISU_DEV_REF"
+              NEXT_BRANCH="dev_susfs"
+              ;;
+            *)
+              echo "未知分支: $branch_input" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$variant_input" in
+            "Official") BRANCH="-s $OFFICIAL_REF" ;;
+            "SukiSU") BRANCH="-s $SUKISU_REF" ;;
+            "ReSukiSU") BRANCH="$RESUKISU_REF" ;;
+            "Next") BRANCH="$NEXT_BRANCH" ;;
+            *) echo "未知变体: $variant_input" >&2; exit 1 ;;
+          esac
 
           echo "BRANCH=$BRANCH" >> $GITHUB_ENV
           echo "KSU 分支: $BRANCH"
@@ -833,7 +837,7 @@ jobs:
               ;;
             "Next")
               echo "添加 KernelSU-Next..."
-              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev_susfs
+              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s "$BRANCH"
               ;;
             "SukiSU")
               echo "添加 SukiSU..."
