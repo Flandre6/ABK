@@ -180,10 +180,11 @@ fun AbkRootPatchScreen(
         ?: ""
     val hasLkmSource = hasLocalLkm || selectedAsset != null
     val showRootInstallModes = rootGranted
+    val hasUserlandKsud = userlandKsudPath != null
     val canPatchSelectedFile = selectedBootPath.isNotBlank() &&
         hasLkmSource &&
         !running &&
-        (userlandKsudPath != null || rootGranted)
+        (hasUserlandKsud || rootGranted)
     val canDirectInstall = rootGranted && hasLkmSource && !running
     val canFlashAnyKernel3 = rootGranted && selectedAnyKernelPath.isNotBlank() && !running
     val canProceed = when (selectedMode) {
@@ -667,8 +668,8 @@ fun AbkRootPatchScreen(
             if (!hasLkmSource && selectedMode != LkmPatchInstallMode.AnyKernel3) {
                 InlineWarning("当前变体和 KMI 没有内置 LKM，请选择本地 .ko 文件。")
             }
-            if (selectedMode == LkmPatchInstallMode.SelectFile && userlandKsudPath == null && !rootGranted) {
-                InlineWarning("未检测到可执行的 APK 内置 SukiSU-Ultra ksud；未授权 Root 时只能在选择 boot.img 后生成 patched 镜像。")
+            if (selectedMode == LkmPatchInstallMode.SelectFile && !hasUserlandKsud && !rootGranted) {
+                InlineWarning("当前 APK 未包含可执行的内置 SukiSU-Ultra ksud，无法无 Root 修补 boot.img。请使用带内置 ksud 的 APK，或授予 Root 后继续。")
             }
 
             Button(
