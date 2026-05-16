@@ -342,6 +342,8 @@ object RootUtils {
     fun resolveUserlandKsudPath(context: Context): String? =
         prepareBundledKsudPath(context) ?: embeddedKsudPath(context)
 
+    fun resolveUserlandMagiskbootPath(context: Context): String? = embeddedMagiskbootPath(context)
+
     fun patchAbkLkmBootImage(
         context: Context,
         bootImagePath: String?,

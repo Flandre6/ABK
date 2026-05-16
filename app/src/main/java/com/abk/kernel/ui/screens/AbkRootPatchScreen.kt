@@ -174,6 +174,9 @@ fun AbkRootPatchScreen(
     val userlandKsudPath by produceState<String?>(initialValue = null, context) {
         value = withContext(Dispatchers.IO) { RootUtils.resolveUserlandKsudPath(context) }
     }
+    val userlandMagiskbootPath by produceState<String?>(initialValue = null, context) {
+        value = withContext(Dispatchers.IO) { RootUtils.resolveUserlandMagiskbootPath(context) }
+    }
     val hasLocalLkm = selectedLocalLkmPath.isNotBlank()
     val activeLkmLabel = selectedLocalLkmName.takeIf { it.isNotBlank() }
         ?: selectedAsset?.let { "${it.variantLabel} · ${it.kmi}" }
@@ -181,10 +184,11 @@ fun AbkRootPatchScreen(
     val hasLkmSource = hasLocalLkm || selectedAsset != null
     val showRootInstallModes = rootGranted
     val hasUserlandKsud = userlandKsudPath != null
+    val hasUserlandMagiskboot = userlandMagiskbootPath != null
     val canPatchSelectedFile = selectedBootPath.isNotBlank() &&
         hasLkmSource &&
         !running &&
-        (hasUserlandKsud || rootGranted)
+        (rootGranted || (hasUserlandKsud && hasUserlandMagiskboot))
     val canDirectInstall = rootGranted && hasLkmSource && !running
     val canFlashAnyKernel3 = rootGranted && selectedAnyKernelPath.isNotBlank() && !running
     val canProceed = when (selectedMode) {
@@ -668,8 +672,11 @@ fun AbkRootPatchScreen(
             if (!hasLkmSource && selectedMode != LkmPatchInstallMode.AnyKernel3) {
                 InlineWarning("当前变体和 KMI 没有内置 LKM，请选择本地 .ko 文件。")
             }
-            if (selectedMode == LkmPatchInstallMode.SelectFile && !hasUserlandKsud && !rootGranted) {
-                InlineWarning("当前 APK 未包含可执行的内置 SukiSU-Ultra ksud，无法无 Root 修补 boot.img。请使用带内置 ksud 的 APK，或授予 Root 后继续。")
+            if (selectedMode == LkmPatchInstallMode.SelectFile && !rootGranted) {
+                when {
+                    !hasUserlandKsud -> InlineWarning("当前 APK 未包含可执行的内置 SukiSU-Ultra ksud，无法无 Root 修补 boot.img。请使用带内置 ksud 的 APK，或授予 Root 后继续。")
+                    !hasUserlandMagiskboot -> InlineWarning("当前 APK 未包含可执行的内置 magiskboot，无法无 Root 解包 boot.img。请使用带内置 magiskboot 的 APK，或授予 Root 后继续。")
+                }
             }
 
             Button(
