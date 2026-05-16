@@ -463,7 +463,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAbkRuntimeStatus() {
         viewModelScope.launch {
             _uiState.update { it.copy(abkRuntimeLoading = true, abkRuntimeError = null) }
+            val rootGranted = _uiState.value.rootGranted
             val (runtimeStatus, runtimeError) = withContext(Dispatchers.IO) {
+                if (!rootGranted && !RootUtils.isNativeManagerActive()) {
+                    return@withContext null to externalManagerAccessDeniedMessage()
+                }
                 val snapshot = RootUtils.readManagerRuntimeSnapshot()
                 if (!snapshot.manager.active) {
                     null to snapshot.manager.diagnostics.firstOrNull()
@@ -508,10 +512,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val backendAtRequest = _uiState.value.abkRuntimeStatus?.runtimeBackend?.backend
+            val rootGranted = _uiState.value.rootGranted
             _uiState.update {
                 it.copy(rootGrantLoading = true, rootGrantError = null)
             }
             val (active, apps, diagnostic) = withContext(Dispatchers.IO) {
+                if (!rootGranted && !RootUtils.isNativeManagerActive()) {
+                    return@withContext Triple(false, emptyList(), externalManagerAccessDeniedMessage())
+                }
                 val nativeActive = RootUtils.isNativeManagerActive()
                 val rootGrantApps = if (nativeActive) {
                     RootUtils.listRootGrantApps(getApplication<Application>())
@@ -2262,7 +2270,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshManagerSettings(force: Boolean = false) {
         if (!force && _uiState.value.managerSettingsLoading) return
         viewModelScope.launch {
+            val rootGranted = _uiState.value.rootGranted
             _uiState.update { it.copy(managerSettingsLoading = true, managerSettingsError = null) }
+            if (!rootGranted && !withContext(Dispatchers.IO) { RootUtils.isNativeManagerActive() }) {
+                _uiState.update {
+                    it.copy(
+                        managerSettingsLoading = false,
+                        managerSettingsError = externalManagerAccessDeniedMessage(),
+                        managerSettingActionId = null
+                    )
+                }
+                return@launch
+            }
             val loaded = runCatching {
                 withContext(Dispatchers.IO) {
                     loadManagerSettings()
@@ -2359,7 +2378,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshManagerTools(force: Boolean = false) {
         if (!force && _uiState.value.managerToolsLoading) return
         viewModelScope.launch {
+            val rootGranted = _uiState.value.rootGranted
             _uiState.update { it.copy(managerToolsLoading = true, managerToolsError = null) }
+            if (!rootGranted && !withContext(Dispatchers.IO) { RootUtils.isNativeManagerActive() }) {
+                _uiState.update {
+                    it.copy(
+                        managerToolsLoading = false,
+                        managerToolsError = externalManagerAccessDeniedMessage(),
+                        managerToolActionId = null
+                    )
+                }
+                return@launch
+            }
             val modeResult = withContext(Dispatchers.IO) { RootUtils.readSelinuxMode() }
             val pathsResult = withContext(Dispatchers.IO) { RootUtils.listUmountPaths() }
             val mode = modeResult.output.lastOrNull { it.isNotBlank() }?.trim().orEmpty()
@@ -2465,7 +2495,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAppProfileTemplates() {
         if (_uiState.value.appProfileTemplatesLoading) return
         viewModelScope.launch {
+            val rootGranted = _uiState.value.rootGranted
             _uiState.update { it.copy(appProfileTemplatesLoading = true, appProfileTemplatesError = null) }
+            if (!rootGranted && !withContext(Dispatchers.IO) { RootUtils.isNativeManagerActive() }) {
+                _uiState.update {
+                    it.copy(
+                        appProfileTemplatesLoading = false,
+                        appProfileTemplatesError = externalManagerAccessDeniedMessage()
+                    )
+                }
+                return@launch
+            }
             val result = withContext(Dispatchers.IO) {
                 RootUtils.listAppProfileTemplates()
             }
@@ -3636,6 +3676,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 }
+
+private fun externalManagerAccessDeniedMessage(): String =
+    "未授予 ABK Root 权限，无法读取外部 Root 后端。请先为 ABK 授权，或使用已将 ABK 识别为原生管理器的内核。"
 
 private fun sanitizeBuildPlanName(name: String, config: KernelBuildConfig): String =
     name.trim().ifBlank { defaultBuildPlanName(config) }.take(BUILD_PLAN_NAME_LIMIT)
