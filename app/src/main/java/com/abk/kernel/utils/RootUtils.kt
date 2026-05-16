@@ -689,7 +689,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" module list
+            abk_exec_ksud "${'$'}ksud_path" module list
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 30L)
     }
@@ -700,7 +700,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" module action $safeId
+            abk_exec_ksud "${'$'}ksud_path" module action $safeId
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 300L, onOutput = onOutput)
     }
@@ -712,7 +712,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" module $verb $safeId
+            abk_exec_ksud "${'$'}ksud_path" module $verb $safeId
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 30L)
     }
@@ -724,7 +724,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" module $verb $safeId
+            abk_exec_ksud "${'$'}ksud_path" module $verb $safeId
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 30L)
     }
@@ -734,7 +734,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" kpm list
+            abk_exec_ksud "${'$'}ksud_path" kpm list
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 30L)
     }
@@ -759,7 +759,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" kpm info $safeName
+            abk_exec_ksud "${'$'}ksud_path" kpm info $safeName
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 30L)
     }
@@ -845,7 +845,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" profile set-sepolicy $safePackage $safeRules
+            abk_exec_ksud "${'$'}ksud_path" profile set-sepolicy $safePackage $safeRules
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = 30L).success
     }
@@ -913,7 +913,7 @@ object RootUtils {
             set -e
             ksud_path=${'$'}(abk_find_ksud)
             [ -n "${'$'}ksud_path" ] || exit 127
-            "${'$'}ksud_path" $cleanArgs
+            abk_exec_ksud "${'$'}ksud_path" $cleanArgs
         """.trimIndent()
         return execRootScript(withManagerShellHelpers(script), timeoutSeconds = timeoutSeconds)
     }
@@ -1124,7 +1124,7 @@ object RootUtils {
                     val safeKsud = shellQuote(ksudPath)
                     val version = execWithShell(
                         shell,
-                        "$safeKsud --version 2>/dev/null || true",
+                        "abk_exec_ksud $safeKsud --version 2>/dev/null || true",
                         normalizeOutput = false
                     )
                         .output
@@ -1135,10 +1135,10 @@ object RootUtils {
                         shell,
                         """
                         caps="root_shell modules"
-                        $safeKsud module list >/dev/null 2>&1 && caps="${'$'}caps module_control"
-                        $safeKsud susfs status >/dev/null 2>&1 && caps="${'$'}caps susfs"
-                        $safeKsud kpm version >/dev/null 2>&1 && caps="${'$'}caps kpm"
-                        $safeKsud feature check su_compat >/dev/null 2>&1 && caps="${'$'}caps features"
+                        abk_exec_ksud $safeKsud module list >/dev/null 2>&1 && caps="${'$'}caps module_control"
+                        abk_exec_ksud $safeKsud susfs status >/dev/null 2>&1 && caps="${'$'}caps susfs"
+                        abk_exec_ksud $safeKsud kpm version >/dev/null 2>&1 && caps="${'$'}caps kpm"
+                        abk_exec_ksud $safeKsud feature check su_compat >/dev/null 2>&1 && caps="${'$'}caps features"
                         printf '%s\n' "${'$'}caps"
                         """.trimIndent(),
                         normalizeOutput = false
@@ -1299,8 +1299,28 @@ object RootUtils {
     private fun embeddedKsudPath(context: Context? = appContext): String? {
         val safeContext = context ?: return null
         return File(safeContext.applicationInfo.nativeLibraryDir, "libksud.so")
-            .takeIf { it.isFile && it.canExecute() }
+            .takeIf { it.isFile }
             ?.absolutePath
+    }
+
+    private fun isEmbeddedKsudPath(path: String): Boolean =
+        File(path).name == "libksud.so"
+
+    private fun resolveAndroidLinkerPath(): String {
+        val candidates = if (Process.is64Bit()) {
+            listOf("/apex/com.android.runtime/bin/linker64", "/system/bin/linker64")
+        } else {
+            listOf("/apex/com.android.runtime/bin/linker", "/system/bin/linker")
+        }
+        return candidates.firstOrNull { File(it).isFile } ?: candidates.first()
+    }
+
+    private fun buildKsudCommand(ksudPath: String, args: List<String>): List<String> {
+        return if (isEmbeddedKsudPath(ksudPath)) {
+            listOf(resolveAndroidLinkerPath(), ksudPath) + args
+        } else {
+            listOf(ksudPath) + args
+        }
     }
 
     private fun prepareBundledKsudPath(context: Context): String? {
@@ -1390,7 +1410,7 @@ object RootUtils {
                     shell,
                     """
                         set -e
-                        ${shellQuote(rootKsud.path)} $command
+                        abk_exec_ksud ${shellQuote(rootKsud.path)} $command
                     """.trimIndent(),
                     onOutput = onOutput
                 )
@@ -1405,7 +1425,7 @@ object RootUtils {
 
     private fun detectBootPatchOptionSupport(ksudPath: String): BootPatchOptionSupport {
         val result = runLocalCommand(
-            command = listOf(ksudPath, "boot-patch", "--help"),
+            command = buildKsudCommand(ksudPath, listOf("boot-patch", "--help")),
             timeoutSeconds = 15L
         )
         return parseBootPatchOptionSupport(result.output)
@@ -1415,7 +1435,7 @@ object RootUtils {
         val result = execWithShell(
             shell,
             """
-                ${shellQuote(ksudPath)} boot-patch --help 2>&1 || true
+                abk_exec_ksud ${shellQuote(ksudPath)} boot-patch --help 2>&1 || true
             """.trimIndent(),
             normalizeOutput = false
         )
@@ -1598,16 +1618,34 @@ object RootUtils {
 
     private fun withManagerShellHelpers(script: String): String {
         val embedded = embeddedKsudPath()?.let(::shellQuote) ?: "''"
+        val linker = shellQuote(resolveAndroidLinkerPath())
         return """
             abk_embedded_ksud=$embedded
+            abk_embedded_linker=$linker
+            abk_can_exec_ksud() {
+                if [ -n "${'$'}abk_embedded_ksud" ] && [ "$1" = "${'$'}abk_embedded_ksud" ]; then
+                    [ -f "$1" ]
+                else
+                    [ -x "$1" ]
+                fi
+            }
             abk_find_ksud() {
                 for candidate in "${'$'}abk_embedded_ksud" /data/adb/ksud ${'$'}(command -v ksud 2>/dev/null || true); do
                     [ -n "${'$'}candidate" ] || continue
-                    [ -x "${'$'}candidate" ] || continue
+                    abk_can_exec_ksud "${'$'}candidate" || continue
                     printf '%s\n' "${'$'}candidate"
                     return 0
                 done
                 return 1
+            }
+            abk_exec_ksud() {
+                local candidate="$1"
+                shift
+                if [ -n "${'$'}abk_embedded_ksud" ] && [ "${'$'}candidate" = "${'$'}abk_embedded_ksud" ]; then
+                    "${'$'}abk_embedded_linker" "${'$'}candidate" "${'$'}@"
+                else
+                    "${'$'}candidate" "${'$'}@"
+                fi
             }
             abk_ksud_source() {
                 if [ -n "${'$'}abk_embedded_ksud" ] && [ "$1" = "${'$'}abk_embedded_ksud" ]; then
