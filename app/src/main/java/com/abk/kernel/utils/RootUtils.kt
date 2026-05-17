@@ -1261,9 +1261,6 @@ object RootUtils {
             .joinToString(" · ")
         val nativeVariant = inferManagerVariant(versionText).ifBlank { "KernelSU" }
         if (!status.isManager) {
-            val identitySummary = appContext
-                ?.let(AbkManagerIdentity::verifySelf)
-                ?.mismatchSummary()
             return ManagerRuntimeProbe(
                 active = false,
                 displayName = nativeVariant,
@@ -1272,14 +1269,9 @@ object RootUtils {
                 version = versionText,
                 workMode = if (status.isLkmMode) "lkm" else "built-in",
                 capabilities = listOf("native_kernel"),
-                diagnostics = buildList {
-                    add(
-                        "KernelSU/ReSukiSU native 接口可访问，但当前 ABK APK 未被识别为管理器。请确认安装的是与内核构建时 ABK_MANAGER_CERT_SHA256 匹配的 ${com.abk.kernel.BuildConfig.ABK_MANAGER_PACKAGE} 正式签名 APK。"
-                    )
-                    if (!identitySummary.isNullOrBlank()) {
-                        add("ABK 管理器身份校验失败: $identitySummary")
-                    }
-                }
+                diagnostics = listOf(
+                    "KernelSU/ReSukiSU native 接口可访问，但当前 ABK APK 未被识别为管理器。请确认安装的是与内核构建时 ABK_MANAGER_CERT_SHA256 匹配的 com.abk.kernel 正式签名 APK。"
+                )
             )
         }
         val workMode = if (status.isLkmMode) "lkm" else "built-in"
