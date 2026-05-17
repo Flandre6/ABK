@@ -3099,32 +3099,40 @@ jobs:
                   echo "编译前兜底修复 ${{ inputs.ksu_variant }} 5.15 kallsyms symbol_resolver"
                   python3 - <<'PY'
             from pathlib import Path
+            from textwrap import dedent
 
             VARIANT = "${{ inputs.ksu_variant }}"
-            MARKER = "ABK: Android 13 5.15.74-5.15.137 Official/ReSukiSU kallsyms weak reference"
-            INCLUDE_ANCHOR = '#include "infra/symbol_resolver.h"\n'
-            DIRECT_CALL = "    kallsyms_on_each_symbol(ksu_lookup_symbol_cb, &ctx);\n"
-            GUARDED_CALL = """#ifdef CONFIG_KALLSYMS
-                if (!kallsyms_on_each_symbol)
-                    return NULL;
-            #endif
-
-                kallsyms_on_each_symbol(ksu_lookup_symbol_cb, &ctx);
-            """
-            WEAK_BLOCK = f"""
+            MARKER = "ABK: Android 13 5.15.74-5.15.137 Official/ReSukiSU kallsyms lookup rewrite"
+            LEGACY_MARKER = "ABK: Android 13 5.15.74-5.15.137 Official/ReSukiSU kallsyms weak reference"
+            TARGET_SOURCE = dedent(f"""\
+            // SPDX-License-Identifier: GPL-2.0-only
             /*
              * {MARKER}.
              *
              * The affected GKI 5.15 builds can fail while linking .tmp_vmlinux.btf
-             * when KernelSU keeps a strong reference to kallsyms_on_each_symbol.
-             * Keep this scoped workflow patch weak so final kernels that provide
-             * the symbol still resolve and use it.
+             * when KernelSU keeps a static kallsyms_on_each_symbol callback path
+             * under clang ThinLTO. Rewrite symbol resolution to the simpler
+             * kallsyms_lookup_name path used by modern KernelSU/ReSukiSU trees so
+             * the built-in code no longer emits forbidden PLT/GOT entries.
              */
-            #ifdef CONFIG_KALLSYMS
-            extern __attribute__((weak)) typeof(kallsyms_on_each_symbol) kallsyms_on_each_symbol;
-            #endif
+            #include <linux/kernel.h>
+            #include <linux/string.h>
+            #include <linux/kallsyms.h>
 
-            """
+            #include "infra/symbol_resolver.h"
+
+            unsigned long ksu_symbol_lookup_name(const char *name)
+            {{
+            #ifdef CONFIG_KALLSYMS
+                if (!name || !*name)
+                    return 0;
+
+                return kallsyms_lookup_name(name);
+            #else
+                return 0;
+            #endif
+            }}
+            """)
 
             candidates = []
             seen = set()
@@ -3140,36 +3148,47 @@ jobs:
                 raise SystemExit(f"{VARIANT} 未找到最终编译目录 infra/symbol_resolver.c，无法应用 5.15 kallsyms 兼容补丁")
 
             changed = False
+            matched = False
             for path in candidates:
                 print(f"检查 5.15 kallsyms 编译目录: {path}")
                 text = path.read_text()
-                if "kallsyms_on_each_symbol" not in text:
-                    print(f"{path} 未引用 kallsyms_on_each_symbol，跳过")
+                if "ksu_symbol_lookup_name(" not in text:
+                    print(f"{path} 未找到 ksu_symbol_lookup_name()，跳过")
                     continue
 
-                updated = text
-                if MARKER not in updated:
-                    if INCLUDE_ANCHOR not in updated:
-                        raise SystemExit(f"{path} 缺少 include anchor: {INCLUDE_ANCHOR.strip()}")
-                    updated = updated.replace(INCLUDE_ANCHOR, INCLUDE_ANCHOR + WEAK_BLOCK, 1)
+                matched = True
+                needs_rewrite = (
+                    MARKER not in text
+                    or LEGACY_MARKER in text
+                    or "kallsyms_on_each_symbol(" in text
+                    or "__attribute__((weak))" in text
+                    or "return kallsyms_lookup_name(name);" not in text
+                )
 
-                if "if (!kallsyms_on_each_symbol)" not in updated:
-                    if DIRECT_CALL not in updated:
-                        raise SystemExit(f"{path} 未找到预期 kallsyms_on_each_symbol 调用位置")
-                    updated = updated.replace(DIRECT_CALL, GUARDED_CALL, 1)
-
-                if MARKER not in updated or "if (!kallsyms_on_each_symbol)" not in updated:
-                    raise SystemExit(f"{path} 的 5.15 kallsyms 兼容补丁未成功落地")
-
-                if updated != text:
-                    path.write_text(updated)
+                if needs_rewrite:
+                    path.write_text(TARGET_SOURCE)
                     changed = True
-                    print(f"已修复 {path} 的 {VARIANT} 5.15 kallsyms 弱引用兼容")
+                    print(f"已将 {path} 重写为 {VARIANT} 5.15 kallsyms 直接查表实现")
                 else:
-                    print(f"{path} 已包含 {VARIANT} 5.15 kallsyms 兼容补丁")
+                    print(f"{path} 已使用无 PLT/GOT 的 kallsyms_lookup_name 实现")
+
+                final_text = path.read_text()
+                if MARKER not in final_text:
+                    raise SystemExit(f"{path} 缺少 5.15 kallsyms rewrite marker")
+                if "kallsyms_on_each_symbol(" in final_text:
+                    raise SystemExit(f"{path} 仍包含 kallsyms_on_each_symbol 直接调用")
+                if "__attribute__((weak))" in final_text:
+                    raise SystemExit(f"{path} 仍包含 weak kallsyms extern")
+                if "return kallsyms_lookup_name(name);" not in final_text:
+                    raise SystemExit(f"{path} 未切换到 kallsyms_lookup_name 直接查表实现")
+
+                print(f"已验证 {path}: 无 kallsyms_on_each_symbol 直接调用，且无 weak extern")
+
+            if not matched:
+                raise SystemExit(f"{VARIANT} 未找到可修补的 ksu_symbol_lookup_name() 实现")
 
             if not changed:
-                print(f"{VARIANT} 5.15 kallsyms 兼容补丁无需修改。")
+                print(f"{VARIANT} 5.15 kallsyms rewrite 已经是目标状态，无需修改。")
             PY
                   ;;
               esac
