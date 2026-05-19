@@ -2844,6 +2844,31 @@ jobs:
               print(f"已补回 {kbuild} 的 Official SUSFS hook helper 对象")
               return True
 
+          def ensure_official_symbol_resolver_exports(ksu_dir):
+              path = ksu_dir / "infra/symbol_resolver.c"
+              if not path.exists():
+                  raise SystemExit(f"未找到 {path}，无法补齐 Official SUSFS hook 符号")
+
+              text = path.read_text()
+              if not re.search(r"(?m)^\s*void\s+\*\s*ksu_lookup_symbol\s*\(", text):
+                  raise SystemExit(f"{path} 缺少 ksu_lookup_symbol()，无法补齐 Official SUSFS hook 符号")
+
+              additions = []
+              if not re.search(r"(?m)^\s*void\s+\*\s*ksu_resolve_symbol_for_functable_hook\s*\(", text):
+                  additions.append("void *ksu_resolve_symbol_for_functable_hook(const char *symbol_name)\n{\n    return ksu_lookup_symbol(symbol_name);\n}\n")
+              if not re.search(r"(?m)^\s*unsigned long\s+find_kernel_symbol_exact\s*\(", text):
+                  additions.append("unsigned long find_kernel_symbol_exact(const char *symbol_name)\n{\n    return (unsigned long)ksu_lookup_symbol(symbol_name);\n}\n")
+              if not re.search(r"(?m)^\s*void\s+ksu_init_symbol_resolver\s*\(", text):
+                  additions.append("void ksu_init_symbol_resolver(void)\n{\n}\n")
+
+              if not additions:
+                  return False
+
+              block = "\n/* ABK: Official SUSFS lsm_hook compatibility exports. */\n" + "\n".join(additions)
+              path.write_text(text.rstrip() + "\n" + block)
+              print(f"已补齐 {path} 的 Official SUSFS hook 符号")
+              return True
+
           ksu_dir = Path("common/drivers/kernelsu")
           if not ksu_dir.exists():
               raise SystemExit("未找到 common/drivers/kernelsu，无法修复 Official SUSFS")
@@ -2896,6 +2921,7 @@ jobs:
 
           changed = ensure_official_susfs_objects(ksu_dir) or changed
           changed = patch_official_selinux_hide(ksu_dir) or changed
+          changed = ensure_official_symbol_resolver_exports(ksu_dir) or changed
 
           if not changed:
               print("Official SUSFS 源码兼容修复无需修改。")
@@ -3633,6 +3659,31 @@ jobs:
                 print(f"fixed {kbuild}: restored Official SUSFS hook helper objects")
                 return True
 
+            def ensure_official_symbol_resolver_exports(ksu_dir):
+                path = ksu_dir / "infra/symbol_resolver.c"
+                if not path.exists():
+                    raise SystemExit(f"{path} not found before build")
+
+                text = path.read_text()
+                if not re.search(r"(?m)^\s*void\s+\*\s*ksu_lookup_symbol\s*\(", text):
+                    raise SystemExit(f"{path} does not define ksu_lookup_symbol()")
+
+                additions = []
+                if not re.search(r"(?m)^\s*void\s+\*\s*ksu_resolve_symbol_for_functable_hook\s*\(", text):
+                    additions.append("void *ksu_resolve_symbol_for_functable_hook(const char *symbol_name)\n{\n    return ksu_lookup_symbol(symbol_name);\n}\n")
+                if not re.search(r"(?m)^\s*unsigned long\s+find_kernel_symbol_exact\s*\(", text):
+                    additions.append("unsigned long find_kernel_symbol_exact(const char *symbol_name)\n{\n    return (unsigned long)ksu_lookup_symbol(symbol_name);\n}\n")
+                if not re.search(r"(?m)^\s*void\s+ksu_init_symbol_resolver\s*\(", text):
+                    additions.append("void ksu_init_symbol_resolver(void)\n{\n}\n")
+
+                if not additions:
+                    return False
+
+                block = "\n/* ABK: Official SUSFS lsm_hook compatibility exports. */\n" + "\n".join(additions)
+                path.write_text(text.rstrip() + "\n" + block)
+                print(f"fixed {path}: added Official SUSFS hook symbol exports")
+                return True
+
             ksu_dir = Path("common/drivers/kernelsu")
             if not ksu_dir.exists():
                 raise SystemExit("common/drivers/kernelsu not found before build")
@@ -3675,6 +3726,7 @@ jobs:
 
             fixed = ensure_official_susfs_objects(ksu_dir) or fixed
             fixed = patch_official_selinux_hide(ksu_dir) or fixed
+            fixed = ensure_official_symbol_resolver_exports(ksu_dir) or fixed
 
             if not fixed:
                 print("Official SUSFS KernelSU init.c already fixed")
@@ -3693,6 +3745,12 @@ jobs:
                 && { ! grep -qF 'hook/lsm_hook.o' common/drivers/kernelsu/Kbuild \
                   || ! grep -qF 'hook/arm64/patch_memory.o' common/drivers/kernelsu/Kbuild; }; then
                 echo "::error::Official SUSFS 缺少 common/drivers/kernelsu Kbuild hook helper 对象"
+                exit 1
+              fi
+              if [ -f common/drivers/kernelsu/infra/symbol_resolver.c ] \
+                && { ! grep -qF 'ksu_resolve_symbol_for_functable_hook' common/drivers/kernelsu/infra/symbol_resolver.c \
+                  || ! grep -qF 'find_kernel_symbol_exact' common/drivers/kernelsu/infra/symbol_resolver.c; }; then
+                echo "::error::Official SUSFS 缺少 symbol_resolver hook 兼容符号"
                 exit 1
               fi
             fi
