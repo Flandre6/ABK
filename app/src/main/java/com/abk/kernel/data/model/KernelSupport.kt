@@ -14,6 +14,15 @@ data class KernelVersionLine(
     val kernelVersion: String
 )
 
+data class OnePlusDeviceProfile(
+    val manifest: String,
+    val displayName: String,
+    val systemVersion: String,
+    val cpu: String,
+    val androidVersion: String,
+    val kernelVersion: String
+)
+
 object KernelSupport {
     val buildTargets = listOf(BUILD_TARGET_GKI, BUILD_TARGET_ONEPLUS)
 
@@ -48,40 +57,42 @@ object KernelSupport {
         "sm6375"
     )
 
-    val onePlusDeviceManifestOptions = listOf(
-        "oneplus_13_b",
-        "oneplus_13s_b",
-        "oneplus_13t_b",
-        "oneplus_ace5_pro_b",
-        "oneplus_ace_6",
-        "oneplus_pad_2_pro_b",
-        "oneplus_pad_3_b",
-        "oneplus_ace5_ultra_b",
-        "oneplus_turbo_6",
-        "oneplus_12_b",
-        "oneplus_ace3_pro_b",
-        "oneplus_ace5_b",
-        "oneplus_13r_b",
-        "oneplus_pad2_b",
-        "oneplus_pad_pro_b",
-        "oneplus_ace5_race_b",
-        "oneplus_nord_5_b",
-        "oneplus_11_b",
-        "oneplus_12r_b",
-        "oneplus_ace2_pro_b",
-        "oneplus_ace3_b",
-        "oneplus_open_b",
-        "oneplus_10t_v",
-        "oneplus_11r_b",
-        "oneplus_ace2_b",
-        "oneplus_ace_pro_v",
-        "oneplus_10_pro_b",
-        "oneplus_ace_3v_b",
-        "oneplus_turbo_6v",
-        "oneplus_nord_4_b",
-        "oneplus_nord_ce4_lite_5g",
-        "oneplus_nord_ce4_b"
+    val onePlusDeviceProfiles = listOf(
+        OnePlusDeviceProfile("oneplus_13_b", "OnePlus 13", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_13s_b", "OnePlus 13s", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_13t_b", "OnePlus 13T", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_ace5_pro_b", "OnePlus Ace5 Pro", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_ace_6", "OnePlus Ace 6", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_pad_2_pro_b", "OnePlus Pad 2 Pro", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_pad_3_b", "OnePlus Pad 3", "ColorOS/OxygenOS 16", "sm8750", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_ace5_ultra_b", "OnePlus Ace5 Ultra", "ColorOS/OxygenOS 16", "mt6991", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_turbo_6", "OnePlus Turbo 6", "ColorOS/OxygenOS 16", "sm8735", "android15", "6.6"),
+        OnePlusDeviceProfile("oneplus_12_b", "OnePlus 12", "ColorOS/OxygenOS 16", "sm8650", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_ace3_pro_b", "OnePlus Ace3 Pro", "ColorOS/OxygenOS 16", "sm8650", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_ace5_b", "OnePlus Ace5", "ColorOS/OxygenOS 16", "sm8650", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_13r_b", "OnePlus 13R", "ColorOS/OxygenOS 16", "sm8650", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_pad2_b", "OnePlus Pad 2", "ColorOS/OxygenOS 16", "sm8650", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_pad_pro_b", "OnePlus Pad Pro", "ColorOS/OxygenOS 16", "sm8650", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_ace5_race_b", "OnePlus Ace5 Race", "ColorOS/OxygenOS 16", "mt6989", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_nord_5_b", "OnePlus Nord 5", "ColorOS/OxygenOS 16", "sm8635", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_11_b", "OnePlus 11", "ColorOS/OxygenOS 16", "sm8550", "android13", "5.15"),
+        OnePlusDeviceProfile("oneplus_12r_b", "OnePlus 12R", "ColorOS/OxygenOS 16", "sm8550", "android13", "5.15"),
+        OnePlusDeviceProfile("oneplus_ace2_pro_b", "OnePlus Ace2 Pro", "ColorOS/OxygenOS 16", "sm8550", "android13", "5.15"),
+        OnePlusDeviceProfile("oneplus_ace3_b", "OnePlus Ace3", "ColorOS/OxygenOS 16", "sm8550", "android13", "5.15"),
+        OnePlusDeviceProfile("oneplus_open_b", "OnePlus Open", "ColorOS/OxygenOS 16", "sm8550", "android13", "5.15"),
+        OnePlusDeviceProfile("oneplus_10t_v", "OnePlus 10T", "ColorOS/OxygenOS 15", "sm8475", "android12", "5.10"),
+        OnePlusDeviceProfile("oneplus_11r_b", "OnePlus 11R", "ColorOS/OxygenOS 16", "sm8475", "android12", "5.10"),
+        OnePlusDeviceProfile("oneplus_ace2_b", "OnePlus Ace2", "ColorOS/OxygenOS 16", "sm8475", "android12", "5.10"),
+        OnePlusDeviceProfile("oneplus_ace_pro_v", "OnePlus Ace Pro", "ColorOS/OxygenOS 15", "sm8475", "android12", "5.10"),
+        OnePlusDeviceProfile("oneplus_10_pro_b", "OnePlus 10 Pro", "ColorOS/OxygenOS 16", "sm8450", "android12", "5.10"),
+        OnePlusDeviceProfile("oneplus_ace_3v_b", "OnePlus Ace 3V", "ColorOS/OxygenOS 16", "sm7675", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_turbo_6v", "OnePlus Turbo 6V", "ColorOS/OxygenOS 16", "sm7635", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_nord_4_b", "OnePlus Nord 4", "ColorOS/OxygenOS 16", "sm7675", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_nord_ce4_lite_5g", "OnePlus Nord CE4 Lite 5G", "ColorOS/OxygenOS 15", "sm6375", "android14", "6.1"),
+        OnePlusDeviceProfile("oneplus_nord_ce4_b", "OnePlus Nord CE4", "ColorOS/OxygenOS 16", "sm7550", "android13", "5.15")
     )
+
+    val onePlusDeviceManifestOptions = onePlusDeviceProfiles.map { it.manifest }
 
     val entries = listOf(
         KernelSupportEntry("android12", "5.10", "43", "2021-08"),
@@ -230,11 +241,21 @@ object KernelSupport {
         onePlusLines.firstOrNull { it.kernelVersion == kernelVersion }?.androidVersion
             ?: onePlusLines.first().androidVersion
 
+    fun onePlusSusfsSupported(androidVersion: String, kernelVersion: String): Boolean =
+        "$androidVersion/$kernelVersion" in setOf("android14/6.1", "android15/6.6")
+
     fun normalize(config: KernelBuildConfig): KernelBuildConfig {
         val target = normalizeBuildTarget(config.buildTarget)
         val isOnePlus = target == BUILD_TARGET_ONEPLUS
+        val requestedOnePlusManifest = config.onePlusDeviceManifest.orEmpty().trim().lowercase()
+        val onePlusDeviceManifest = requestedOnePlusManifest
+            .takeIf { it in onePlusDeviceManifestOptions }
+            ?: "oneplus_12_b"
+        val onePlusProfile = onePlusDeviceProfile(onePlusDeviceManifest)
         val line = if (isOnePlus) {
-            onePlusLineFor(config.androidVersion, config.kernelVersion)
+            onePlusProfile
+                ?.let { KernelVersionLine(it.androidVersion, it.kernelVersion) }
+                ?: onePlusLineFor(config.androidVersion, config.kernelVersion)
         } else {
             lineFor(config.androidVersion, config.kernelVersion)
         }
@@ -249,14 +270,16 @@ object KernelSupport {
             config.osPatchLevel in patchOptions -> config.osPatchLevel
             else -> patchOptions.maxByOrNull(::patchMonthIndex) ?: latestEntry(line).osPatchLevel
         }
-        val onePlusCpu = config.onePlusCpu.orEmpty().trim().lowercase()
-            .takeIf { it in onePlusCpuOptions }
-            ?: "sm8650"
-        val onePlusDeviceManifest = config.onePlusDeviceManifest.orEmpty().trim().lowercase()
-            .takeIf { it in onePlusDeviceManifestOptions }
-            ?: "oneplus_12_b"
+        val onePlusCpu = if (isOnePlus) {
+            onePlusProfile?.cpu
+                ?: config.onePlusCpu.orEmpty().trim().lowercase().takeIf { it in onePlusCpuOptions }
+                ?: "sm8650"
+        } else {
+            "sm8650"
+        }
         val onePlusKpmSupported = ksuVariant in setOf(KSU_VARIANT_SUKISU, KSU_VARIANT_RESUKISU)
         val onePlusProxyAllowed = !onePlusCpu.startsWith("mt")
+        val onePlusSusfsEnabled = onePlusSusfsSupported(line.androidVersion, line.kernelVersion)
         return config.copy(
             buildTarget = target,
             androidVersion = line.androidVersion,
@@ -280,7 +303,11 @@ object KernelSupport {
                 isOnePlus -> onePlusKpmSupported && config.useKpm
                 else -> config.useKpm
             },
-            cancelSusfs = if (ksuVariant == KSU_VARIANT_NONE) true else config.cancelSusfs,
+            cancelSusfs = when {
+                ksuVariant == KSU_VARIANT_NONE -> true
+                isOnePlus && !onePlusSusfsEnabled -> true
+                else -> config.cancelSusfs
+            },
             kpmPassword = if (isOnePlus || ksuVariant == KSU_VARIANT_NONE) "" else config.kpmPassword,
             virtualizationSupport = if (isOnePlus) "off" else normalizeVirtualizationSupport(line.kernelVersion, config.virtualizationSupport),
             useCustomExternalModules = if (isOnePlus) false else config.useCustomExternalModules,
@@ -320,6 +347,16 @@ object KernelSupport {
     fun ksuVariantOptions(): List<String> = KSU_VARIANT_OPTIONS
 
     fun onePlusKsuVariantOptions(): List<String> = ONEPLUS_KSU_VARIANT_OPTIONS
+
+    fun onePlusDeviceProfile(manifest: String?): OnePlusDeviceProfile? {
+        val normalized = manifest.orEmpty().trim().lowercase()
+        return onePlusDeviceProfiles.firstOrNull { it.manifest == normalized }
+    }
+
+    fun onePlusDeviceLabel(manifest: String): String {
+        val profile = onePlusDeviceProfile(manifest) ?: return manifest
+        return "${profile.displayName} · ${profile.systemVersion} · ${profile.androidVersion}/${profile.kernelVersion} · ${profile.cpu}"
+    }
 
     fun normalizeKsuVariant(value: String?): String = normalizeKsuVariant(value, BUILD_TARGET_GKI)
 

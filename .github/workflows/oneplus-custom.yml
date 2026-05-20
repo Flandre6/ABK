@@ -27,7 +27,7 @@ on:
           - sm6375
         default: sm8650
       device_manifest:
-        description: "机型 manifest 名称"
+        description: "ABK 机型配置（值为上游 XML 名称，构建摘要会明确显示系统版本）"
         required: true
         type: choice
         options:
@@ -96,7 +96,7 @@ on:
           - None
         default: SukiSU
       enable_susfs:
-        description: "启用 SUSFS"
+        description: "启用 SUSFS（仅 android14/6.1 与 android15/6.6 生效，5.10/5.15 自动关闭）"
         required: false
         type: boolean
         default: false

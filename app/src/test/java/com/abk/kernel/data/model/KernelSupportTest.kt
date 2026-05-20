@@ -86,7 +86,7 @@ class KernelSupportTest {
                 kernelVersion = "6.12",
                 kernelsuVariant = KSU_VARIANT_NEXT,
                 onePlusCpu = "mt6991",
-                onePlusDeviceManifest = "oneplus_13_b",
+                onePlusDeviceManifest = "oneplus_ace5_ultra_b",
                 onePlusUseProxyOptimization = true,
                 useKpm = true,
                 useDdk = true,
@@ -96,14 +96,38 @@ class KernelSupportTest {
         )
 
         assertEquals(BUILD_TARGET_ONEPLUS, normalized.buildTarget)
-        assertEquals("android14", normalized.androidVersion)
-        assertEquals("6.1", normalized.kernelVersion)
+        assertEquals("android15", normalized.androidVersion)
+        assertEquals("6.6", normalized.kernelVersion)
         assertEquals(KSU_VARIANT_NEXT, normalized.kernelsuVariant)
         assertEquals("mt6991", normalized.onePlusCpu)
-        assertEquals("oneplus_13_b", normalized.onePlusDeviceManifest)
+        assertEquals("oneplus_ace5_ultra_b", normalized.onePlusDeviceManifest)
         assertFalse(normalized.onePlusUseProxyOptimization)
         assertFalse(normalized.useKpm)
         assertFalse(normalized.useDdk)
         assertTrue(normalized.customExternalModules.isEmpty())
+    }
+
+    @Test
+    fun onePlusDeviceLabelUsesAbkProfileInsteadOfManifestSuffixRule() {
+        assertEquals(
+            "OnePlus Turbo 6V · ColorOS/OxygenOS 16 · android14/6.1 · sm7635",
+            KernelSupport.onePlusDeviceLabel("oneplus_turbo_6v")
+        )
+    }
+
+    @Test
+    fun normalizeOnePlusDisablesSusfsWhenNoUpstreamBranchExists() {
+        val normalized = KernelSupport.normalize(
+            KernelBuildConfig(
+                buildTarget = BUILD_TARGET_ONEPLUS,
+                kernelsuVariant = KSU_VARIANT_SUKISU,
+                cancelSusfs = false,
+                onePlusDeviceManifest = "oneplus_10t_v"
+            )
+        )
+
+        assertEquals("android12", normalized.androidVersion)
+        assertEquals("5.10", normalized.kernelVersion)
+        assertTrue(normalized.cancelSusfs)
     }
 }

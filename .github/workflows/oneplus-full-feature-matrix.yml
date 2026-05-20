@@ -19,7 +19,7 @@ on:
           - None
         default: SukiSU
       enable_susfs:
-        description: "启用 SUSFS"
+        description: "启用 SUSFS（仅 android14/6.1 与 android15/6.6 生效，5.10/5.15 自动关闭）"
         required: false
         type: boolean
         default: false
@@ -140,6 +140,41 @@ jobs:
               "oneplus_nord_ce4_b",
           ]
 
+          PROFILE_MAP = {
+              "oneplus_13_b": ("OnePlus 13", "ColorOS/OxygenOS 16"),
+              "oneplus_13s_b": ("OnePlus 13s", "ColorOS/OxygenOS 16"),
+              "oneplus_13t_b": ("OnePlus 13T", "ColorOS/OxygenOS 16"),
+              "oneplus_ace5_pro_b": ("OnePlus Ace5 Pro", "ColorOS/OxygenOS 16"),
+              "oneplus_ace_6": ("OnePlus Ace 6", "ColorOS/OxygenOS 16"),
+              "oneplus_pad_2_pro_b": ("OnePlus Pad 2 Pro", "ColorOS/OxygenOS 16"),
+              "oneplus_pad_3_b": ("OnePlus Pad 3", "ColorOS/OxygenOS 16"),
+              "oneplus_ace5_ultra_b": ("OnePlus Ace5 Ultra", "ColorOS/OxygenOS 16"),
+              "oneplus_turbo_6": ("OnePlus Turbo 6", "ColorOS/OxygenOS 16"),
+              "oneplus_12_b": ("OnePlus 12", "ColorOS/OxygenOS 16"),
+              "oneplus_ace3_pro_b": ("OnePlus Ace3 Pro", "ColorOS/OxygenOS 16"),
+              "oneplus_ace5_b": ("OnePlus Ace5", "ColorOS/OxygenOS 16"),
+              "oneplus_13r_b": ("OnePlus 13R", "ColorOS/OxygenOS 16"),
+              "oneplus_pad2_b": ("OnePlus Pad 2", "ColorOS/OxygenOS 16"),
+              "oneplus_pad_pro_b": ("OnePlus Pad Pro", "ColorOS/OxygenOS 16"),
+              "oneplus_ace5_race_b": ("OnePlus Ace5 Race", "ColorOS/OxygenOS 16"),
+              "oneplus_nord_5_b": ("OnePlus Nord 5", "ColorOS/OxygenOS 16"),
+              "oneplus_11_b": ("OnePlus 11", "ColorOS/OxygenOS 16"),
+              "oneplus_12r_b": ("OnePlus 12R", "ColorOS/OxygenOS 16"),
+              "oneplus_ace2_pro_b": ("OnePlus Ace2 Pro", "ColorOS/OxygenOS 16"),
+              "oneplus_ace3_b": ("OnePlus Ace3", "ColorOS/OxygenOS 16"),
+              "oneplus_open_b": ("OnePlus Open", "ColorOS/OxygenOS 16"),
+              "oneplus_10t_v": ("OnePlus 10T", "ColorOS/OxygenOS 15"),
+              "oneplus_11r_b": ("OnePlus 11R", "ColorOS/OxygenOS 16"),
+              "oneplus_ace2_b": ("OnePlus Ace2", "ColorOS/OxygenOS 16"),
+              "oneplus_ace_pro_v": ("OnePlus Ace Pro", "ColorOS/OxygenOS 15"),
+              "oneplus_10_pro_b": ("OnePlus 10 Pro", "ColorOS/OxygenOS 16"),
+              "oneplus_ace_3v_b": ("OnePlus Ace 3V", "ColorOS/OxygenOS 16"),
+              "oneplus_turbo_6v": ("OnePlus Turbo 6V", "ColorOS/OxygenOS 16"),
+              "oneplus_nord_4_b": ("OnePlus Nord 4", "ColorOS/OxygenOS 16"),
+              "oneplus_nord_ce4_lite_5g": ("OnePlus Nord CE4 Lite 5G", "ColorOS/OxygenOS 15"),
+              "oneplus_nord_ce4_b": ("OnePlus Nord CE4", "ColorOS/OxygenOS 16"),
+          }
+
           KERNEL_LINES = {
               "1": ("android12", "5.10"),
               "2": ("android13", "5.15"),
@@ -199,12 +234,23 @@ jobs:
                           )
 
                       android_version, kernel_version = line
+                      display_name, system_version = PROFILE_MAP[device_manifest]
+                      enable_susfs = (
+                          os.environ.get("MATRIX_ENABLE_SUSFS", "").lower() == "true"
+                          and os.environ.get("MATRIX_KSU_VARIANT", "") != "None"
+                          and f"{android_version}/{kernel_version}" in {"android14/6.1", "android15/6.6"}
+                      )
                       matrix.append(
                           {
                               "cpu": cpu,
                               "device_manifest": device_manifest,
+                              "device_label": (
+                                  f"{display_name} · {system_version} · "
+                                  f"{android_version}/{kernel_version} · {cpu}"
+                              ),
                               "android_version": android_version,
                               "kernel_version": kernel_version,
+                              "enable_susfs": enable_susfs,
                           }
                       )
                       found.add(device_manifest)
@@ -233,7 +279,7 @@ jobs:
               summary.write("## OnePlus 全矩阵内核构建\n\n")
               summary.write(f"- 总任务数: {len(matrix)}\n")
               summary.write(f"- KernelSU 变体: {os.environ.get('MATRIX_KSU_VARIANT', '')}\n")
-              summary.write(f"- SUSFS: {env_enabled('MATRIX_ENABLE_SUSFS')}\n")
+              summary.write(f"- SUSFS: {env_enabled('MATRIX_ENABLE_SUSFS')}（仅 android14/6.1 与 android15/6.6 生效，5.10/5.15 自动 off）\n")
               summary.write(f"- KPM: {env_enabled('MATRIX_USE_KPM')}（仅 SukiSU/ReSukiSU 生效）\n")
               summary.write(f"- lz4kd: {env_enabled('MATRIX_USE_LZ4KD')}\n")
               summary.write(f"- BBG: {env_enabled('MATRIX_USE_BBG')}\n")
@@ -252,7 +298,7 @@ jobs:
           PY
 
   build-oneplus-full-matrix:
-    name: "${{ matrix.device_manifest }}-${{ matrix.kernel_version }}-${{ inputs.kernelsu_variant }}"
+    name: "${{ matrix.device_label }} · ${{ inputs.kernelsu_variant }}"
     needs: prepare-matrix
     if: ${{ needs.prepare-matrix.outputs.count != '0' }}
     strategy:
@@ -267,7 +313,7 @@ jobs:
       android_version: ${{ matrix.android_version }}
       kernel_version: ${{ matrix.kernel_version }}
       ksu_variant: ${{ inputs.kernelsu_variant }}
-      enable_susfs: ${{ inputs.enable_susfs }}
+      enable_susfs: ${{ matrix.enable_susfs }}
       use_kpm: ${{ inputs.use_kpm }}
       use_lz4kd: ${{ inputs.use_lz4kd }}
       use_bbg: ${{ inputs.use_bbg }}

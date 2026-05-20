@@ -3909,7 +3909,7 @@ internal fun sanitizeBuildPlanName(name: String, config: KernelBuildConfig): Str
 
 internal fun defaultBuildPlanName(config: KernelBuildConfig): String {
     if (config.buildTarget == BUILD_TARGET_ONEPLUS) {
-        return listOf(config.onePlusDeviceManifest.orEmpty(), config.onePlusCpu.orEmpty(), config.kernelsuVariant)
+        return listOf(KernelSupport.onePlusDeviceLabel(config.onePlusDeviceManifest), config.kernelsuVariant)
             .filter { it.isNotBlank() }
             .joinToString(" · ")
     }
@@ -4370,8 +4370,10 @@ private fun isBuildSummaryExtraLabel(label: String): Boolean {
     val compact = label.replace(Regex("\\s+"), "").lowercase()
     return compact in setOf(
         "构建目标",
+        "机型配置",
         "cpu分支",
         "手机型号",
+        "上游xml",
         "unicode绕过"
     )
 }

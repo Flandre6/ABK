@@ -88,23 +88,72 @@ jobs:
           if [ "$KSU_VARIANT" = "None" ]; then
             ENABLE_SUSFS="false"
           fi
+          if [ "$KERNEL_VERSION" = "5.10" ] || [ "$KERNEL_VERSION" = "5.15" ]; then
+            if [ "$ENABLE_SUSFS" = "true" ]; then
+              echo "::warning::OnePlus SUSFS only supports android14/6.1 and android15/6.6; disabling for $ANDROID_VERSION/$KERNEL_VERSION."
+            fi
+            ENABLE_SUSFS="false"
+          fi
           effective_proxy="$USE_PROXY_OPTIMIZATION"
           if [[ "$CPU" == mt* ]]; then
             effective_proxy="false"
           fi
+          case "$DEVICE_MANIFEST" in
+            oneplus_13_b) device_name="OnePlus 13"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_13s_b) device_name="OnePlus 13s"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_13t_b) device_name="OnePlus 13T"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace5_pro_b) device_name="OnePlus Ace5 Pro"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace_6) device_name="OnePlus Ace 6"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_pad_2_pro_b) device_name="OnePlus Pad 2 Pro"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_pad_3_b) device_name="OnePlus Pad 3"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace5_ultra_b) device_name="OnePlus Ace5 Ultra"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_turbo_6) device_name="OnePlus Turbo 6"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_12_b) device_name="OnePlus 12"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace3_pro_b) device_name="OnePlus Ace3 Pro"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace5_b) device_name="OnePlus Ace5"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_13r_b) device_name="OnePlus 13R"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_pad2_b) device_name="OnePlus Pad 2"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_pad_pro_b) device_name="OnePlus Pad Pro"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace5_race_b) device_name="OnePlus Ace5 Race"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_nord_5_b) device_name="OnePlus Nord 5"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_11_b) device_name="OnePlus 11"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_12r_b) device_name="OnePlus 12R"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace2_pro_b) device_name="OnePlus Ace2 Pro"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace3_b) device_name="OnePlus Ace3"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_open_b) device_name="OnePlus Open"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_10t_v) device_name="OnePlus 10T"; system_version="ColorOS/OxygenOS 15" ;;
+            oneplus_11r_b) device_name="OnePlus 11R"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace2_b) device_name="OnePlus Ace2"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace_pro_v) device_name="OnePlus Ace Pro"; system_version="ColorOS/OxygenOS 15" ;;
+            oneplus_10_pro_b) device_name="OnePlus 10 Pro"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_ace_3v_b) device_name="OnePlus Ace 3V"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_turbo_6v) device_name="OnePlus Turbo 6V"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_nord_4_b) device_name="OnePlus Nord 4"; system_version="ColorOS/OxygenOS 16" ;;
+            oneplus_nord_ce4_lite_5g) device_name="OnePlus Nord CE4 Lite 5G"; system_version="ColorOS/OxygenOS 15" ;;
+            oneplus_nord_ce4_b) device_name="OnePlus Nord CE4"; system_version="ColorOS/OxygenOS 16" ;;
+            *) device_name="$DEVICE_MANIFEST"; system_version="未知系统版本" ;;
+          esac
+          device_label="${device_name} · ${system_version} · ${ANDROID_VERSION}/${KERNEL_VERSION} · ${CPU}"
+          device_artifact_id="$(
+            printf '%s' "$device_label" |
+              sed 's#ColorOS/OxygenOS #COS-OOS#g; s#/#-#g; s# · #_#g; s# #_#g; s#[^A-Za-z0-9._-]#_#g'
+          )"
 
           {
             echo "EFFECTIVE_KPM=$effective_kpm"
             echo "EFFECTIVE_PROXY_OPTIMIZATION=$effective_proxy"
             echo "EFFECTIVE_ENABLE_SUSFS=$ENABLE_SUSFS"
+            echo "DEVICE_LABEL=$device_label"
+            echo "DEVICE_ARTIFACT_ID=$device_artifact_id"
           } >> "$GITHUB_ENV"
 
           echo "========================================"
           echo "       内核构建配置摘要"
           echo "========================================"
           echo "构建目标      : OnePlus"
+          echo "机型配置      : $device_label"
           echo "CPU 分支      : $CPU"
-          echo "手机型号      : $DEVICE_MANIFEST"
+          echo "上游 XML      : $DEVICE_MANIFEST"
           echo "Android 版本  : $ANDROID_VERSION"
           echo "内核版本      : $KERNEL_VERSION"
           echo "子版本号      : OnePlus manifest"
@@ -489,7 +538,7 @@ jobs:
           else
             algo_label="base"
           fi
-          artifact_name="${DEVICE_MANIFEST}_${variant_label}_${algo_label}"
+          artifact_name="${DEVICE_ARTIFACT_ID}_${variant_label}_${algo_label}"
           if [ "$EFFECTIVE_ENABLE_SUSFS" = "true" ]; then
             artifact_name="${artifact_name}_SUSFS"
           fi

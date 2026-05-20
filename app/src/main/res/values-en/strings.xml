@@ -116,7 +116,7 @@
     <string name="build_virtualization_line">Virtualization support: %1$s</string>
     <string name="build_external_modules_line">External modules: %1$s</string>
     <string name="build_external_modules_count">%1$d</string>
-    <string name="build_oneplus_device_line">OnePlus device: %1$s · CPU %2$s</string>
+    <string name="build_oneplus_device_line">OnePlus device: %1$s</string>
     <string name="build_oneplus_kernel_line">OnePlus KMI: %1$s · Kernel %2$s</string>
     <string name="build_oneplus_feature_line">SUSFS: %1$s · lz4kd: %2$s · KPM: %3$s</string>
     <string name="build_oneplus_network_line">BBR: %1$s · Proxy optimization: %2$s · Unicode bypass: %3$s</string>
@@ -141,7 +141,8 @@
     <string name="build_handle_later">Handle later</string>
     <string name="build_kernel_version_config">Kernel version config</string>
     <string name="build_oneplus_cpu">OnePlus CPU branch</string>
-    <string name="build_oneplus_device_manifest">OnePlus device manifest</string>
+    <string name="build_oneplus_device_manifest">OnePlus device profile</string>
+    <string name="build_oneplus_profile_desc">ABK shows the system version, KMI, and CPU directly; manifest suffixes are only upstream XML names, not selection rules.</string>
     <string name="build_android_version">Android version</string>
     <string name="build_kernel_version">Kernel version</string>
     <string name="build_sub_level">Sub level</string>
@@ -175,6 +176,7 @@
     <string name="build_oneplus_bbr">Enable BBR</string>
     <string name="build_oneplus_proxy_optimization">Enable proxy optimization</string>
     <string name="build_oneplus_proxy_mtk_disabled">Proxy optimization is forced off for MTK branches.</string>
+    <string name="build_oneplus_susfs_unsupported">The current OnePlus KMI has no available SUSFS upstream branch. Only android14/6.1 and android15/6.6 are supported; android12/5.10 and android13/5.15 are disabled automatically.</string>
     <string name="build_oneplus_unicode_bypass">Enable Unicode zero-width bypass fix</string>
     <string name="build_oneplus_proxy_short">Proxy optimization</string>
     <string name="build_oneplus_unicode_short">Unicode bypass</string>

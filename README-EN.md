@@ -54,8 +54,9 @@ You can also run the workflows manually from GitHub Actions.
 ## OnePlus/Oplus Device Builds
 
 The app's Build tab can switch between `GKI` and `OnePlus` targets. Selecting `OnePlus` dispatches [`oneplus-custom.yml`](.github/workflows/oneplus-custom.yml), which syncs the selected CPU branch and device XML from the OnePlus/Oplus manifest.
+ABK no longer uses `_b/_v/_u/_t` as the user-facing selection rule; the app, workflow summaries, and matrix job names show the device, ColorOS/OxygenOS system line, Android KMI, and CPU directly, while the upstream XML name stays only as a repo-init parameter.
 
-The first OnePlus build target supports `android12/5.10`, `android13/5.15`, `android14/6.1`, and `android15/6.6`, with KernelSU Official, KernelSU Next, SukiSU, ReSukiSU, or rootless builds. OnePlus-specific switches include SUSFS, KPM, lz4kd, BBG, BBR, proxy optimization, and the Unicode zero-width bypass fix; MTK CPU branches force proxy optimization off.
+The first OnePlus build target supports `android12/5.10`, `android13/5.15`, `android14/6.1`, and `android15/6.6`, with KernelSU Official, KernelSU Next, SukiSU, ReSukiSU, or rootless builds. OnePlus-specific switches include SUSFS, KPM, lz4kd, BBG, BBR, proxy optimization, and the Unicode zero-width bypass fix; SUSFS only applies to `android14/6.1` and `android15/6.6`, while `android12/5.10` and `android13/5.15` disable it automatically; MTK CPU branches force proxy optimization off.
 
 To batch-build every currently supported OnePlus/Oplus device, manually run [`oneplus-full-feature-matrix.yml`](.github/workflows/oneplus-full-feature-matrix.yml) from GitHub Actions. The matrix reads the upstream manifest and generates jobs by CPU branch and KMI line.
 
@@ -85,7 +86,7 @@ Virtualization support enables the kernel features needed by Linux container env
 **If the build fails or bootloops after flashing:** Try switching to a different slot patch (e.g. 678 → 123 or 345). Different kernel sub-levels may require different patches.
 - Flashing kernels is high-risk and may cause boot failure, data loss, or require restoring a stock boot image.
 - Do not build or flash if you are unsure about the target partition, kernel version, Android version, or security patch level.
-- OnePlus ColorOS 14 / 15 compatibility still needs device-side validation and may require data wiping in failure cases.
+- OnePlus ColorOS/OxygenOS 13 / 14 / 15 / 16 compatibility still needs device-side validation and may require data wiping in failure cases.
 - If a build fails, first check whether SukiSU / SUSFS / ReSukiSU upstream branches have recently changed and are temporarily out of sync.
 - Custom external modules execute `setup.sh` from third-party repository roots. Review the script and source before enabling it.
 - ABK is intended only for devices and repositories you own or are explicitly authorized to use. Do not use it for unauthorized access, fraud, abuse, anti-risk bypassing, cheating, data theft, service disruption, or other illegal purposes.

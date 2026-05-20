@@ -252,7 +252,7 @@ fun BuildScreen(
                     Text(stringResource(R.string.build_config_overview), fontWeight = FontWeight.SemiBold)
                     if (isOnePlusBuild) {
                         Text(stringResource(R.string.build_target_line, buildTargetLabel(config.buildTarget)))
-                        Text(stringResource(R.string.build_oneplus_device_line, config.onePlusDeviceManifest, config.onePlusCpu))
+                        Text(stringResource(R.string.build_oneplus_device_line, KernelSupport.onePlusDeviceLabel(config.onePlusDeviceManifest)))
                         Text(stringResource(R.string.build_oneplus_kernel_line, config.androidVersion, config.kernelVersion))
                         Text("KSU: ${ksuVariantDisplayName(config.kernelsuVariant)}")
                         Text(
@@ -747,46 +747,40 @@ fun BuildScreen(
             SectionCard(section = BuildSection.KernelVersion) {
                 if (isOnePlusBuild) {
                     DropdownField(
-                        label = stringResource(R.string.build_oneplus_cpu),
-                        value = config.onePlusCpu,
-                        options = KernelSupport.onePlusCpuOptions,
-                        onSelect = { vm.updateBuildConfig(KernelSupport.normalize(config.copy(onePlusCpu = it))) }
-                    )
-                    DropdownField(
                         label = stringResource(R.string.build_oneplus_device_manifest),
                         value = config.onePlusDeviceManifest,
                         options = KernelSupport.onePlusDeviceManifestOptions,
-                        onSelect = { vm.updateBuildConfig(KernelSupport.normalize(config.copy(onePlusDeviceManifest = it))) }
+                        optionLabel = KernelSupport::onePlusDeviceLabel,
+                        onSelect = { manifest ->
+                            val profile = KernelSupport.onePlusDeviceProfile(manifest)
+                            vm.updateBuildConfig(
+                                KernelSupport.normalize(
+                                    config.copy(
+                                        onePlusDeviceManifest = manifest,
+                                        onePlusCpu = profile?.cpu ?: config.onePlusCpu,
+                                        androidVersion = profile?.androidVersion ?: config.androidVersion,
+                                        kernelVersion = profile?.kernelVersion ?: config.kernelVersion
+                                    )
+                                )
+                            )
+                        }
                     )
-                    DropdownField(
+                    Text(
+                        text = stringResource(R.string.build_oneplus_profile_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ReadOnlyField(
+                        label = stringResource(R.string.build_oneplus_cpu),
+                        value = config.onePlusCpu
+                    )
+                    ReadOnlyField(
                         label = stringResource(R.string.build_android_version),
-                        value = config.androidVersion,
-                        options = KernelSupport.onePlusAndroidVersions(),
-                        onSelect = {
-                            vm.updateBuildConfig(
-                                KernelSupport.normalize(
-                                    config.copy(
-                                        androidVersion = it,
-                                        kernelVersion = KernelSupport.onePlusKernelForAndroid(it)
-                                    )
-                                )
-                            )
-                        }
+                        value = config.androidVersion
                     )
-                    DropdownField(
+                    ReadOnlyField(
                         label = stringResource(R.string.build_kernel_version),
-                        value = config.kernelVersion,
-                        options = KernelSupport.onePlusKernelVersions(),
-                        onSelect = {
-                            vm.updateBuildConfig(
-                                KernelSupport.normalize(
-                                    config.copy(
-                                        androidVersion = KernelSupport.onePlusAndroidForKernel(it),
-                                        kernelVersion = it
-                                    )
-                                )
-                            )
-                        }
+                        value = config.kernelVersion
                     )
                 } else {
                     DropdownField(
@@ -923,8 +917,20 @@ fun BuildScreen(
                 if (isOnePlusBuild) {
                     val kpmSupported = config.kernelsuVariant in setOf(KSU_VARIANT_SUKISU, KSU_VARIANT_RESUKISU)
                     val proxyAllowed = !config.onePlusCpu.startsWith("mt")
-                    SwitchRow(stringResource(R.string.build_enable_susfs), !config.cancelSusfs, enabled = !noRootScheme) {
+                    val onePlusSusfsSupported = KernelSupport.onePlusSusfsSupported(config.androidVersion, config.kernelVersion)
+                    SwitchRow(
+                        stringResource(R.string.build_enable_susfs),
+                        !config.cancelSusfs && onePlusSusfsSupported,
+                        enabled = !noRootScheme && onePlusSusfsSupported
+                    ) {
                         vm.updateBuildConfig(KernelSupport.normalize(config.copy(cancelSusfs = !it)))
+                    }
+                    if (!onePlusSusfsSupported) {
+                        Text(
+                            text = stringResource(R.string.build_oneplus_susfs_unsupported),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     SwitchRow(stringResource(R.string.build_enable_kpm), config.useKpm, enabled = kpmSupported && !noRootScheme) {
                         vm.updateBuildConfig(KernelSupport.normalize(config.copy(useKpm = it)))
@@ -2108,7 +2114,7 @@ private fun buildPlanSummary(config: KernelBuildConfig): String {
         if (config.onePlusUseProxyOptimization) enabled += stringResource(R.string.build_oneplus_proxy_short)
         if (config.onePlusUseUnicodeBypass) enabled += stringResource(R.string.build_oneplus_unicode_short)
         val featureSummary = enabled.ifEmpty { listOf(stringResource(R.string.build_base_config)) }.joinToString("、")
-        return "${buildTargetLabel(config.buildTarget)} · ${config.onePlusDeviceManifest} · ${config.onePlusCpu}\n" +
+        return "${buildTargetLabel(config.buildTarget)} · ${KernelSupport.onePlusDeviceLabel(config.onePlusDeviceManifest)}\n" +
             "${config.kernelVersion} · ${config.androidVersion} · ${ksuVariantDisplayName(config.kernelsuVariant)} · $featureSummary"
     }
     val android = config.androidVersion.removePrefix("android").ifBlank { config.androidVersion }
@@ -2150,7 +2156,7 @@ private fun BuildPlanHero(
 ) {
     if (config.buildTarget == BUILD_TARGET_ONEPLUS) {
         ExpressiveHeroCard(
-            title = "${config.onePlusDeviceManifest} · ${config.onePlusCpu}",
+            title = KernelSupport.onePlusDeviceLabel(config.onePlusDeviceManifest),
             subtitle = stringResource(R.string.build_oneplus_hero_desc),
             icon = Icons.Default.PhoneAndroid,
             containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -2595,6 +2601,20 @@ private fun ksuVariantDisplayName(variant: String): String =
         variant
     }
 
+@Composable
+fun ReadOnlyField(
+    label: String,
+    value: String
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        readOnly = true,
+        label = { Text(label) },
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DropdownField(
@@ -2602,12 +2622,13 @@ fun DropdownField(
     value: String,
     options: List<String>,
     recommendedValue: String? = null,
+    optionLabel: (String) -> String = { it },
     onSelect: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
-            value = value,
+            value = optionLabel(value),
             onValueChange = {},
             readOnly = true,
             label = { Text(label) },
@@ -2618,7 +2639,12 @@ fun DropdownField(
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { opt ->
-                val text = if (opt == recommendedValue) "$opt${stringResource(R.string.build_recommended_suffix)}" else opt
+                val labelText = optionLabel(opt)
+                val text = if (opt == recommendedValue) {
+                    "$labelText${stringResource(R.string.build_recommended_suffix)}"
+                } else {
+                    labelText
+                }
                 DropdownMenuItem(
                     text = { Text(text) },
                     onClick = { onSelect(opt); expanded = false },
