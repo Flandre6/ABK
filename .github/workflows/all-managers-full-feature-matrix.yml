@@ -1,0 +1,297 @@
+name: 全管理器全矩阵编译
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_gki:
+        description: "触发 GKI 全矩阵"
+        required: false
+        type: boolean
+        default: true
+      build_oneplus:
+        description: "触发 OnePlus 全矩阵"
+        required: false
+        type: boolean
+        default: true
+      include_official:
+        description: "包含 Official 变体"
+        required: false
+        type: boolean
+        default: true
+      include_next:
+        description: "包含 Next 变体"
+        required: false
+        type: boolean
+        default: true
+      include_sukisu:
+        description: "包含 SukiSU 变体"
+        required: false
+        type: boolean
+        default: true
+      include_resukisu:
+        description: "包含 ReSukiSU 变体"
+        required: false
+        type: boolean
+        default: true
+      include_none:
+        description: "包含 None（无 Root 方案）"
+        required: false
+        type: boolean
+        default: true
+      kernelsu_branch:
+        description: "GKI KSU 分支"
+        required: true
+        type: choice
+        options:
+          - Stable(标准)
+          - Dev(开发)
+          - Custom(自定义)
+        default: Dev(开发)
+      version:
+        description: "自定义版本名 (可选)"
+        required: false
+        type: string
+        default: ""
+      revision:
+        description: "修订版本 (如 r11，仅 5.10 需要)"
+        required: false
+        type: string
+        default: "r11"
+      build_time:
+        description: "自定义构建时间 (可选，N或留空=当前UTC)"
+        required: false
+        type: string
+        default: "Sun Dec 01 08:10:00 UTC 2024"
+      kpm_password:
+        description: "自定义 KPM 超级密码（留空=使用默认密码）"
+        required: false
+        type: string
+        default: ""
+      enable_susfs:
+        description: "GKI 启用 SUSFS"
+        required: false
+        type: boolean
+        default: true
+      use_zram:
+        description: "GKI 启用 ZRAM 增强算法（6.12 会自动关闭）"
+        required: false
+        type: boolean
+        default: true
+      zram_full_algo:
+        description: "GKI 启用 ZRAM 完整算法支持（6.12 会自动关闭）"
+        required: false
+        type: boolean
+        default: true
+      zram_extra_algos:
+        description: "GKI 自定义 ZRAM 算法（逗号分隔，仅未启用完整算法时生效）"
+        required: false
+        type: string
+        default: ""
+      use_bbg:
+        description: "GKI 启用 BBG 防格机"
+        required: false
+        type: boolean
+        default: true
+      use_ddk:
+        description: "GKI 启用 DDK 防格机 LSM"
+        required: false
+        type: boolean
+        default: true
+      use_ntsync:
+        description: "GKI 启用 NTsync"
+        required: false
+        type: boolean
+        default: true
+      use_networking:
+        description: "GKI 启用网络增强（IPSet + BBR）"
+        required: false
+        type: boolean
+        default: true
+      use_kpm:
+        description: "GKI 启用 KPM 功能"
+        required: false
+        type: boolean
+        default: true
+      use_rekernel:
+        description: "GKI 启用 Re-Kernel 驱动"
+        required: false
+        type: boolean
+        default: true
+      supp_op:
+        description: "GKI 启用一加 8E 支持"
+        required: false
+        type: boolean
+        default: true
+      virtualization_support:
+        description: "GKI 虚拟化支持 (5.10~6.6: 槽位补丁, 6.12: 开/关；on 在 5.10~6.6 自动使用 678)"
+        required: false
+        type: choice
+        options:
+          - "off"
+          - "on"
+          - "678"
+          - "123"
+          - "345"
+        default: "off"
+      use_custom_external_modules:
+        description: "GKI 启用自定义外部模块注入"
+        required: false
+        type: boolean
+        default: false
+      custom_external_modules:
+        description: "GKI 自定义外部模块（repo;stage|repo;stage，stage=after_patch/before_build）"
+        required: false
+        type: string
+        default: ""
+      upload_aux_artifacts:
+        description: "GKI 上传辅助产物"
+        required: false
+        type: boolean
+        default: false
+      oneplus_enable_susfs:
+        description: "OnePlus 启用 SUSFS（仅 android14/6.1 与 android15/6.6 生效）"
+        required: false
+        type: boolean
+        default: false
+      oneplus_use_kpm:
+        description: "OnePlus 启用 KPM"
+        required: false
+        type: boolean
+        default: false
+      oneplus_use_lz4kd:
+        description: "OnePlus 启用 lz4kd"
+        required: false
+        type: boolean
+        default: false
+      oneplus_use_bbg:
+        description: "OnePlus 启用 BBG"
+        required: false
+        type: boolean
+        default: true
+      oneplus_use_bbr:
+        description: "OnePlus 启用 BBR"
+        required: false
+        type: boolean
+        default: false
+      oneplus_use_proxy_optimization:
+        description: "OnePlus 启用代理相关网络优化（MTK 会自动关闭）"
+        required: false
+        type: boolean
+        default: true
+      oneplus_use_unicode_bypass:
+        description: "OnePlus 启用 Unicode 零宽绕过修复"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare-variant-matrix:
+    name: 准备管理器矩阵
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.variant-matrix.outputs.matrix }}
+      count: ${{ steps.variant-matrix.outputs.count }}
+    steps:
+      - name: 检出代码仓库
+        uses: actions/checkout@v6
+
+      - name: 生成管理器矩阵
+        id: variant-matrix
+        shell: bash
+        env:
+          INCLUDE_OFFICIAL: ${{ inputs.include_official }}
+          INCLUDE_NEXT: ${{ inputs.include_next }}
+          INCLUDE_SUKISU: ${{ inputs.include_sukisu }}
+          INCLUDE_RESUKISU: ${{ inputs.include_resukisu }}
+          INCLUDE_NONE: ${{ inputs.include_none }}
+          BUILD_GKI: ${{ inputs.build_gki }}
+          BUILD_ONEPLUS: ${{ inputs.build_oneplus }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import json
+          import os
+
+          variants = []
+          for key, label in [
+              ("INCLUDE_OFFICIAL", "Official"),
+              ("INCLUDE_NEXT", "Next"),
+              ("INCLUDE_SUKISU", "SukiSU"),
+              ("INCLUDE_RESUKISU", "ReSukiSU"),
+              ("INCLUDE_NONE", "None"),
+          ]:
+              if os.environ.get(key, "").lower() == "true":
+                  variants.append({"ksu_variant": label})
+
+          matrix_json = json.dumps({"include": variants}, separators=(",", ":"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={matrix_json}\n")
+              output.write(f"count={len(variants)}\n")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## 全管理器全矩阵编译\n\n")
+              summary.write(f"- GKI 全矩阵: {os.environ.get('BUILD_GKI', '').lower() == 'true'}\n")
+              summary.write(f"- OnePlus 全矩阵: {os.environ.get('BUILD_ONEPLUS', '').lower() == 'true'}\n")
+              summary.write(f"- 管理器变体数: {len(variants)}\n")
+              summary.write(f"- 管理器变体: {', '.join(v['ksu_variant'] for v in variants) if variants else '无'}\n")
+
+          print(matrix_json)
+          PY
+
+  build-gki-full-matrix:
+    name: "GKI · ${{ matrix.ksu_variant }}"
+    needs: prepare-variant-matrix
+    if: ${{ inputs.build_gki && needs.prepare-variant-matrix.outputs.count != '0' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJson(needs.prepare-variant-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/kernel-full-feature-matrix.yml
+    secrets: inherit
+    with:
+      kernelsu_variant: ${{ matrix.ksu_variant }}
+      kernelsu_branch: ${{ inputs.kernelsu_branch }}
+      version: ${{ inputs.version }}
+      revision: ${{ inputs.revision }}
+      build_time: ${{ inputs.build_time }}
+      kpm_password: ${{ inputs.kpm_password }}
+      enable_susfs: ${{ inputs.enable_susfs }}
+      use_zram: ${{ inputs.use_zram }}
+      zram_full_algo: ${{ inputs.zram_full_algo }}
+      zram_extra_algos: ${{ inputs.zram_extra_algos }}
+      use_bbg: ${{ inputs.use_bbg }}
+      use_ddk: ${{ inputs.use_ddk }}
+      use_ntsync: ${{ inputs.use_ntsync }}
+      use_networking: ${{ inputs.use_networking }}
+      use_kpm: ${{ inputs.use_kpm }}
+      use_rekernel: ${{ inputs.use_rekernel }}
+      supp_op: ${{ inputs.supp_op }}
+      virtualization_support: ${{ inputs.virtualization_support }}
+      use_custom_external_modules: ${{ inputs.use_custom_external_modules }}
+      custom_external_modules: ${{ inputs.custom_external_modules }}
+      upload_aux_artifacts: ${{ inputs.upload_aux_artifacts }}
+
+  build-oneplus-full-matrix:
+    name: "OnePlus · ${{ matrix.ksu_variant }}"
+    needs: prepare-variant-matrix
+    if: ${{ inputs.build_oneplus && needs.prepare-variant-matrix.outputs.count != '0' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJson(needs.prepare-variant-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/oneplus-full-feature-matrix.yml
+    secrets: inherit
+    with:
+      kernelsu_variant: ${{ matrix.ksu_variant }}
+      enable_susfs: ${{ inputs.oneplus_enable_susfs }}
+      use_kpm: ${{ inputs.oneplus_use_kpm }}
+      use_lz4kd: ${{ inputs.oneplus_use_lz4kd }}
+      use_bbg: ${{ inputs.oneplus_use_bbg }}
+      use_bbr: ${{ inputs.oneplus_use_bbr }}
+      use_proxy_optimization: ${{ inputs.oneplus_use_proxy_optimization }}
+      use_unicode_bypass: ${{ inputs.oneplus_use_unicode_bypass }}

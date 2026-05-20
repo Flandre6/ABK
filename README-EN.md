@@ -59,6 +59,7 @@ ABK no longer uses `_b/_v/_u/_t` as the user-facing selection rule; the app, wor
 The first OnePlus build target supports `android12/5.10`, `android13/5.15`, `android14/6.1`, and `android15/6.6`, with KernelSU Official, KernelSU Next, SukiSU, ReSukiSU, or rootless builds. OnePlus-specific switches include SUSFS, KPM, lz4kd, BBG, BBR, proxy optimization, and the Unicode zero-width bypass fix; SUSFS only applies to `android14/6.1` and `android15/6.6`, while `android12/5.10` and `android13/5.15` disable it automatically; MTK CPU branches force proxy optimization off.
 
 To batch-build every currently supported OnePlus/Oplus device, manually run [`oneplus-full-feature-matrix.yml`](.github/workflows/oneplus-full-feature-matrix.yml) from GitHub Actions. The matrix reads the upstream manifest and generates jobs by CPU branch and KMI line.
+To trigger a full matrix across all manager variants for both GKI and OnePlus in one place, use [`all-managers-full-feature-matrix.yml`](.github/workflows/all-managers-full-feature-matrix.yml). Its inputs let you choose which variants to include, whether to run GKI or OnePlus, and the common build customizations.
 
 ## Risk Notice
 
