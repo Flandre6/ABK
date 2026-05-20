@@ -128,6 +128,11 @@ on:
         required: false
         type: boolean
         default: false
+      trigger_release:
+        description: "触发补发 Release"
+        required: false
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       kernelsu_variant:
@@ -212,6 +217,10 @@ on:
         required: false
         type: boolean
         default: false
+      trigger_release:
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   prepare-matrix:
@@ -397,7 +406,7 @@ jobs:
     needs:
       - prepare-matrix
       - build-full-feature-matrix
-    if: ${{ needs.prepare-matrix.outputs.count != '0' && needs.build-full-feature-matrix.result == 'success' && github.repository == 'xingguangcuican6666/ABK' }}
+    if: ${{ inputs.trigger_release && needs.prepare-matrix.outputs.count != '0' && needs.build-full-feature-matrix.result == 'success' && github.repository == 'xingguangcuican6666/ABK' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
