@@ -1672,6 +1672,7 @@ private fun openSourceNoticeGroups(): List<OpenSourceNoticeGroup> = listOf(
         listOf(
             OpenSourceNotice("zzh20188/GKI_KernelSU_SUSFS", "Upstream repository license", "BuildConfig.UPSTREAM_REPO_URL", BuildConfig.UPSTREAM_REPO_URL),
             OpenSourceNotice("WildKernels/GKI_KernelSU_SUSFS", "Upstream repository license", "BuildConfig.TOP_LEVEL_REPO_URL", BuildConfig.TOP_LEVEL_REPO_URL),
+            OpenSourceNotice("CodeLinaro CLO LA", "Top-level upstream project licenses", "OnePlus manifest upstream", "https://git.codelinaro.org/clo/la"),
             OpenSourceNotice("OnePlusOSS/kernel_manifest", "Upstream repository license / no SPDX detected", "OnePlus manifest parent", "https://github.com/OnePlusOSS/kernel_manifest"),
             OpenSourceNotice("Xiaomichael/kernel_manifest", "Upstream repository license / no SPDX detected", "OnePlus manifest branch source", "https://github.com/Xiaomichael/kernel_manifest"),
             OpenSourceNotice("Xiaomichael/kernel_patches", "Upstream repository license / no SPDX detected", "OnePlus patch source", "https://github.com/Xiaomichael/kernel_patches"),
