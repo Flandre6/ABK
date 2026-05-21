@@ -90,7 +90,6 @@ on:
         type: choice
         options:
           - Official
-          - Next
           - SukiSU
           - ReSukiSU
           - None

@@ -84,7 +84,7 @@ class KernelSupportTest {
                 buildTarget = BUILD_TARGET_ONEPLUS,
                 androidVersion = "android16",
                 kernelVersion = "6.12",
-                kernelsuVariant = KSU_VARIANT_NEXT,
+                kernelsuVariant = KSU_VARIANT_SUKISU,
                 onePlusCpu = "mt6991",
                 onePlusDeviceManifest = "oneplus_ace5_ultra_b",
                 onePlusUseProxyOptimization = true,
@@ -98,7 +98,7 @@ class KernelSupportTest {
         assertEquals(BUILD_TARGET_ONEPLUS, normalized.buildTarget)
         assertEquals("android15", normalized.androidVersion)
         assertEquals("6.6", normalized.kernelVersion)
-        assertEquals(KSU_VARIANT_NEXT, normalized.kernelsuVariant)
+        assertEquals(KSU_VARIANT_SUKISU, normalized.kernelsuVariant)
         assertEquals("mt6991", normalized.onePlusCpu)
         assertEquals("oneplus_ace5_ultra_b", normalized.onePlusDeviceManifest)
         assertFalse(normalized.onePlusUseProxyOptimization)

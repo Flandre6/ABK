@@ -363,7 +363,6 @@ object KernelSupport {
     fun normalizeKsuVariant(value: String?, buildTarget: String?): String {
         val normalized = when (value.orEmpty().trim().lowercase()) {
             KSU_VARIANT_OFFICIAL.lowercase() -> KSU_VARIANT_OFFICIAL
-            KSU_VARIANT_NEXT.lowercase() -> KSU_VARIANT_NEXT
             KSU_VARIANT_SUKISU.lowercase() -> KSU_VARIANT_SUKISU
             KSU_VARIANT_RESUKISU.lowercase() -> KSU_VARIANT_RESUKISU
             KSU_VARIANT_NONE.lowercase(), "无" -> KSU_VARIANT_NONE

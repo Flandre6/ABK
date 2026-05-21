@@ -346,7 +346,6 @@ const val KSU_BRANCH_DEV = "Dev(开发)"
 const val KSU_BRANCH_CUSTOM = "Custom(自定义)"
 const val KSU_VARIANT_NONE = "None"
 const val KSU_VARIANT_OFFICIAL = "Official"
-const val KSU_VARIANT_NEXT = "Next"
 const val KSU_VARIANT_SUKISU = "SukiSU"
 const val KSU_VARIANT_RESUKISU = "ReSukiSU"
 const val BUILD_TARGET_GKI = "gki"
@@ -362,7 +361,6 @@ val KSU_VARIANT_OPTIONS = listOf(
 )
 val ONEPLUS_KSU_VARIANT_OPTIONS = listOf(
     KSU_VARIANT_OFFICIAL,
-    KSU_VARIANT_NEXT,
     KSU_VARIANT_SUKISU,
     KSU_VARIANT_RESUKISU,
     KSU_VARIANT_NONE
