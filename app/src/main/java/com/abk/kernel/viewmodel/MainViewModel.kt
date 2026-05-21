@@ -711,7 +711,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         } ?: runtimeBackendInfo
         return (controlStatus ?: AbkRuntimeStatus()).copy(
-            schema = maxOf(controlStatus?.schema ?: 0, 3),
+            schema = maxOf(controlStatus?.schema ?: 0, 4),
             abkVersion = controlStatus?.abkVersion?.ifBlank { BuildConfig.VERSION_NAME } ?: BuildConfig.VERSION_NAME,
             workMode = resolveRuntimeWorkMode(controlStatus?.workMode, manager),
             manager = managerInfo,
@@ -988,11 +988,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val result = withContext(Dispatchers.IO) {
-                if (module?.isKsuBacked() == true) {
-                    RootUtils.setKsuModuleEnabled(cleanId, enabled)
-                } else {
-                    val command = if (enabled) "enable $cleanId" else "disable $cleanId"
-                    RootUtils.writeAbkControlCommand(command)
+                when (module?.preferredControlBackend()) {
+                    RuntimeModuleControlBackend.ABK_CONTROL -> {
+                        val command = if (enabled) "enable $cleanId" else "disable $cleanId"
+                        val controlResult = RootUtils.writeAbkControlCommand(command)
+                        if (controlResult.success || !module.isKsuBacked()) {
+                            controlResult
+                        } else {
+                            RootUtils.setKsuModuleEnabled(cleanId, enabled)
+                        }
+                    }
+                    RuntimeModuleControlBackend.KSU -> RootUtils.setKsuModuleEnabled(cleanId, enabled)
+                    RuntimeModuleControlBackend.NONE, null -> RootUtils.writeAbkControlCommand(
+                        if (enabled) "enable $cleanId" else "disable $cleanId"
+                    )
                 }
             }
             if (!result.success) {
