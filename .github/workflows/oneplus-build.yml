@@ -595,14 +595,16 @@ jobs:
           else
             algo_label="base"
           fi
-          artifact_name="${DEVICE_ARTIFACT_ID}_${variant_label}_${algo_label}"
+          artifact_name="${DEVICE_ARTIFACT_ID}_${variant_label}_${algo_label}_AnyKernel3"
           if [ "$EFFECTIVE_ENABLE_SUSFS" = "true" ]; then
-            artifact_name="${artifact_name}_SUSFS"
+            artifact_name="${artifact_name}_with-SUSFS"
           fi
+          image_artifact_name="${DEVICE_ARTIFACT_ID}_${variant_label}_${algo_label}_raw-image-debug"
           cd AnyKernel3
           zip -q -r9 "../${artifact_name}.zip" ./*
           cd "$WORKSPACE"
           echo "ONEPLUS_ARTIFACT_NAME=$artifact_name" >> "$GITHUB_ENV"
+          echo "ONEPLUS_IMAGE_ARTIFACT_NAME=$image_artifact_name" >> "$GITHUB_ENV"
 
       - name: 上传 AnyKernel3 产物
         uses: actions/upload-artifact@v6
@@ -614,6 +616,6 @@ jobs:
       - name: 上传内核 Image
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ env.ONEPLUS_ARTIFACT_NAME }}-Image
+          name: ${{ env.ONEPLUS_IMAGE_ARTIFACT_NAME }}
           path: oneplus_workspace/Image
           if-no-files-found: warn

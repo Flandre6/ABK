@@ -87,6 +87,14 @@ on:
         default: false
 
 jobs:
+  get-manager:
+    name: 上传管理器和 SUSFS 模块
+    if: ${{ inputs.kernelsu_variant != 'None' }}
+    uses: ./.github/workflows/get-manager.yml
+    secrets: inherit
+    with:
+      kernelsu_variant: ${{ inputs.kernelsu_variant }}
+
   prepare-matrix:
     name: 准备 OnePlus 机型矩阵
     runs-on: ubuntu-latest
