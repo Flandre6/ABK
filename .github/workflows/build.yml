@@ -1856,6 +1856,9 @@ jobs:
           fi
 
           ensure_defconfig_value CONFIG_TCP_CONG_ADVANCED y
+          if [ -f net/ipv4/Kconfig ] && grep -q '^config TCP_CONG_BIC$' net/ipv4/Kconfig; then
+            ensure_defconfig_value CONFIG_TCP_CONG_BIC y
+          fi
           ensure_defconfig_value CONFIG_TCP_CONG_BBR y
           ensure_defconfig_value CONFIG_TCP_CONG_CUBIC y
           ensure_defconfig_value CONFIG_TCP_CONG_WESTWOOD y
@@ -2590,78 +2593,6 @@ jobs:
             sed -i '/kmi_symbol_list_strict_mode/d' ./common/BUILD.bazel
             rm -rf ./common/android/abi_gki_protected_exports_*
             sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl
-            python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-
-          path = Path("./common/BUILD.bazel")
-          if not path.exists():
-              sys.exit(0)
-
-          marker = '"net/ipv4/tcp_bic.ko"'
-          text = path.read_text()
-          if marker in text:
-              sys.exit(0)
-
-          def find_balanced(text, open_index, open_char, close_char):
-              depth = 0
-              quote = None
-              escaped = False
-              for index in range(open_index, len(text)):
-                  char = text[index]
-                  if quote is not None:
-                      if escaped:
-                          escaped = False
-                      elif char == "\\":
-                          escaped = True
-                      elif char == quote:
-                          quote = None
-                      continue
-                  if char in ("'", '"'):
-                      quote = char
-                      continue
-                  if char == open_char:
-                      depth += 1
-                  elif char == close_char:
-                      depth -= 1
-                      if depth == 0:
-                          return index + 1
-              raise SystemExit(f"未找到匹配的 {close_char}: {path}")
-
-          def patch_target_block(text, block_start, block_end, label):
-              block = text[block_start:block_end]
-              pattern = re.compile(
-                  r'(?m)^(\s*(?:"module_implicit_outs"|module_implicit_outs|module_outs)\s*(?::|=)\s*)([^,\n]+)(,\s*)$'
-              )
-
-              def replace(match):
-                  value = match.group(2).rstrip()
-                  if marker in value:
-                      return match.group(0)
-                  return f"{match.group(1)}{value} + [{marker}]{match.group(3)}"
-
-              updated, count = pattern.subn(replace, block, count=1)
-              if count == 0:
-                  raise SystemExit(f"{label} 缺少 module_implicit_outs/module_outs，无法注入 tcp_bic.ko: {path}")
-              return text[:block_start] + updated + text[block_end:]
-
-          if '"kernel_aarch64": {' in text:
-              anchor = '"kernel_aarch64":'
-              block_start = text.index("{", text.index(anchor))
-              block_end = find_balanced(text, block_start, "{", "}")
-              text = patch_target_block(text, block_start, block_end, 'define_common_kernels["kernel_aarch64"]')
-          elif 'common_kernel(\n    name = "kernel_aarch64"' in text:
-              anchor = 'common_kernel(\n    name = "kernel_aarch64"'
-              call_start = text.index(anchor) + len("common_kernel")
-              block_start = text.index("(", call_start)
-              block_end = find_balanced(text, block_start, "(", ")")
-              text = patch_target_block(text, block_start, block_end, 'common_kernel(name = "kernel_aarch64")')
-          else:
-              raise SystemExit(f"未找到 kernel_aarch64 目标，无法注入 tcp_bic.ko: {path}")
-
-          path.write_text(text)
-          PY
           fi
 
           VERSION_INPUT=$(echo "${{ inputs.version }}" | tr -d '[:space:]')
