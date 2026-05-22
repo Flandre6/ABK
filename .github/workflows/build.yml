@@ -2604,28 +2604,63 @@ jobs:
           if marker in text:
               sys.exit(0)
 
-          pattern = re.compile(
-              r'(name\s*=\s*"kernel_aarch64"[\s\S]*?module_outs\s*=\s*\[)([\s\S]*?)(^\s*\])',
-              re.M,
-          )
-          match = pattern.search(text)
-          if not match:
-              print("::warning::未找到 kernel_aarch64 的 module_outs，跳过 tcp_bic.ko 注入")
-              sys.exit(0)
+          def find_balanced(text, open_index, open_char, close_char):
+              depth = 0
+              quote = None
+              escaped = False
+              for index in range(open_index, len(text)):
+                  char = text[index]
+                  if quote is not None:
+                      if escaped:
+                          escaped = False
+                      elif char == "\\":
+                          escaped = True
+                      elif char == quote:
+                          quote = None
+                      continue
+                  if char in ("'", '"'):
+                      quote = char
+                      continue
+                  if char == open_char:
+                      depth += 1
+                  elif char == close_char:
+                      depth -= 1
+                      if depth == 0:
+                          return index + 1
+              raise SystemExit(f"未找到匹配的 {close_char}: {path}")
 
-          body = match.group(2)
-          indent = "        "
-          for line in body.splitlines():
-              if line.strip():
-                  indent = re.match(r'^\s*', line).group(0)
-                  break
+          def patch_target_block(text, block_start, block_end, label):
+              block = text[block_start:block_end]
+              pattern = re.compile(
+                  r'(?m)^(\s*(?:"module_implicit_outs"|module_implicit_outs|module_outs)\s*(?::|=)\s*)([^,\n]+)(,\s*)$'
+              )
 
-          if body.endswith("\n"):
-              body_new = body + f"{indent}{marker},\n"
+              def replace(match):
+                  value = match.group(2).rstrip()
+                  if marker in value:
+                      return match.group(0)
+                  return f"{match.group(1)}{value} + [{marker}]{match.group(3)}"
+
+              updated, count = pattern.subn(replace, block, count=1)
+              if count == 0:
+                  raise SystemExit(f"{label} 缺少 module_implicit_outs/module_outs，无法注入 tcp_bic.ko: {path}")
+              return text[:block_start] + updated + text[block_end:]
+
+          if '"kernel_aarch64": {' in text:
+              anchor = '"kernel_aarch64":'
+              block_start = text.index("{", text.index(anchor))
+              block_end = find_balanced(text, block_start, "{", "}")
+              text = patch_target_block(text, block_start, block_end, 'define_common_kernels["kernel_aarch64"]')
+          elif 'common_kernel(\n    name = "kernel_aarch64"' in text:
+              anchor = 'common_kernel(\n    name = "kernel_aarch64"'
+              call_start = text.index(anchor) + len("common_kernel")
+              block_start = text.index("(", call_start)
+              block_end = find_balanced(text, block_start, "(", ")")
+              text = patch_target_block(text, block_start, block_end, 'common_kernel(name = "kernel_aarch64")')
           else:
-              body_new = body + f"\n{indent}{marker},\n"
+              raise SystemExit(f"未找到 kernel_aarch64 目标，无法注入 tcp_bic.ko: {path}")
 
-          path.write_text(text[:match.start(2)] + body_new + text[match.end(2):])
+          path.write_text(text)
           PY
           fi
 
