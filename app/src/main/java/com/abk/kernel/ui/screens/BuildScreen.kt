@@ -160,6 +160,7 @@ fun BuildScreen(
     var renamePlanName by remember { mutableStateOf("") }
     var deletePlanTarget by remember { mutableStateOf<BuildPlan?>(null) }
     var customModuleUrl by remember { mutableStateOf("") }
+    var buildRepositoryUrl by remember { mutableStateOf("") }
     var pendingCustomModuleUrl by remember { mutableStateOf("") }
     var pendingCustomModuleMetadata by remember { mutableStateOf<ExternalModuleMetadata?>(null) }
     var selectedCustomModuleStages by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -167,8 +168,8 @@ fun BuildScreen(
     var editingCustomModuleStages by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var removingCustomModuleKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val coroutineScope = rememberCoroutineScope()
-    val catalogModules = remember(state.moduleCatalogRepositories) {
-        mergeBuildCatalogModules(state.moduleCatalogRepositories)
+    val catalogModules = remember(state.buildModuleRepositories) {
+        mergeBuildCatalogModules(state.buildModuleRepositories)
     }
     val catalogModuleByUrl = remember(catalogModules) {
         catalogModules.associateBy { it.module.repoUrl.trim().lowercase() }
@@ -1091,6 +1092,121 @@ fun BuildScreen(
                                     }
                                 }
                             }
+                        }
+
+                        if (catalogModules.isNotEmpty()) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            Text(
+                                text = stringResource(R.string.module_repo_build_title),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.module_repo_build_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            catalogModules.forEach { catalog ->
+                                val module = catalog.module
+                                val alreadyAdded = customModuleGroups.any { it.key == module.repoUrl.trim().lowercase() }
+                                ExpressiveListItem(
+                                    title = module.catalogModuleTitle(),
+                                    subtitle = buildString {
+                                        if (module.version.isNotBlank()) {
+                                            append(stringResource(R.string.module_repo_version, module.version))
+                                            append(" · ")
+                                        }
+                                        append(catalog.sources.joinToString(", "))
+                                        if (module.description.isNotBlank()) {
+                                            appendLine()
+                                            append(module.description)
+                                        }
+                                    },
+                                    leadingIcon = Icons.Default.Extension,
+                                    trailingContent = {
+                                        FilledTonalButton(
+                                            onClick = {
+                                                if (vm.addCustomExternalModulesFromUrl(module.repoUrl, module.recommendedStages)) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        context.getString(R.string.module_repo_added_to_build),
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            },
+                                            enabled = !alreadyAdded
+                                        ) {
+                                            Text(
+                                                if (alreadyAdded) {
+                                                    stringResource(R.string.module_repo_joined)
+                                                } else {
+                                                    stringResource(R.string.module_repo_add_to_build)
+                                                }
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(
+                            text = stringResource(R.string.module_repo_build_manage),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        OutlinedTextField(
+                            value = buildRepositoryUrl,
+                            onValueChange = { buildRepositoryUrl = it },
+                            label = { Text(stringResource(R.string.module_repo_build_url)) },
+                            placeholder = { Text("https://github.com/user/abk-module-catalog") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    vm.addBuildModuleRepository(buildRepositoryUrl)
+                                    buildRepositoryUrl = ""
+                                },
+                                enabled = buildRepositoryUrl.isNotBlank(),
+                                modifier = Modifier.weight(1f).height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Add, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.add))
+                            }
+                            OutlinedButton(
+                                onClick = vm::refreshAllBuildModuleRepositories,
+                                enabled = state.buildModuleRepositories.isNotEmpty(),
+                                modifier = Modifier.weight(1f).height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.refresh_all))
+                            }
+                        }
+                        if (state.refreshingBuildModuleRepositoryIds.isNotEmpty()) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                        state.buildModuleRepositories.forEach { repository ->
+                            ExpressiveListItem(
+                                title = repository.name.ifBlank { repository.url },
+                                subtitle = repository.indexJsonUrl.ifBlank { repository.url },
+                                leadingIcon = Icons.Default.Dns,
+                                trailingContent = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        IconButton(onClick = { vm.refreshBuildModuleRepository(repository.id) }) {
+                                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
+                                        }
+                                        IconButton(onClick = { vm.deleteBuildModuleRepository(repository.id) }) {
+                                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
+                                        }
+                                    }
+                                }
+                            )
                         }
 
                         if (manualGroups.isNotEmpty()) {
