@@ -44,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.abk.kernel.R
-import com.abk.kernel.utils.LocaleHelper
 import com.abk.kernel.data.model.BuildPlan
 import com.abk.kernel.data.model.BuildQueueItem
 import com.abk.kernel.data.model.BuildQueueItemStatus
@@ -161,7 +160,6 @@ fun BuildScreen(
     var renamePlanName by remember { mutableStateOf("") }
     var deletePlanTarget by remember { mutableStateOf<BuildPlan?>(null) }
     var customModuleUrl by remember { mutableStateOf("") }
-    var buildRepositoryUrl by remember { mutableStateOf("") }
     var pendingCustomModuleUrl by remember { mutableStateOf("") }
     var pendingCustomModuleMetadata by remember { mutableStateOf<ExternalModuleMetadata?>(null) }
     var selectedCustomModuleStages by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -1093,121 +1091,6 @@ fun BuildScreen(
                                     }
                                 }
                             }
-                        }
-
-                        if (catalogModules.isNotEmpty()) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            Text(
-                                text = buildModuleRepoTitle(),
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = buildModuleRepoDesc(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            catalogModules.forEach { catalog ->
-                                val module = catalog.module
-                                val alreadyAdded = customModuleGroups.any { it.key == module.repoUrl.trim().lowercase() }
-                                ExpressiveListItem(
-                                    title = module.catalogModuleTitle(),
-                                    subtitle = buildString {
-                                        if (module.version.isNotBlank()) {
-                                            append(stringResource(R.string.module_repo_version, module.version))
-                                            append(" · ")
-                                        }
-                                        append(catalog.sources.joinToString(", "))
-                                        if (module.description.isNotBlank()) {
-                                            appendLine()
-                                            append(module.description)
-                                        }
-                                    },
-                                    leadingIcon = Icons.Default.Extension,
-                                    trailingContent = {
-                                        FilledTonalButton(
-                                            onClick = {
-                                                if (vm.addCustomExternalModulesFromUrl(module.repoUrl, module.recommendedStages)) {
-                                                    Toast.makeText(
-                                                        context,
-                                                        context.getString(R.string.module_repo_added_to_build),
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                }
-                                            },
-                                            enabled = !alreadyAdded
-                                        ) {
-                                            Text(
-                                                if (alreadyAdded) {
-                                                    stringResource(R.string.module_repo_joined)
-                                                } else {
-                                                    stringResource(R.string.module_repo_add_to_build)
-                                                }
-                                            )
-                                        }
-                                    }
-                                )
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        Text(
-                            text = buildModuleRepoManage(),
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        OutlinedTextField(
-                            value = buildRepositoryUrl,
-                            onValueChange = { buildRepositoryUrl = it },
-                            label = { Text(buildModuleRepoUrlLabel()) },
-                            placeholder = { Text("https://github.com/user/abk-module-catalog") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    vm.addBuildModuleRepository(buildRepositoryUrl)
-                                    buildRepositoryUrl = ""
-                                },
-                                enabled = buildRepositoryUrl.isNotBlank(),
-                                modifier = Modifier.weight(1f).height(44.dp)
-                            ) {
-                                Icon(Icons.Default.Add, null, modifier = Modifier.size(17.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.add))
-                            }
-                            OutlinedButton(
-                                onClick = vm::refreshAllBuildModuleRepositories,
-                                enabled = state.buildModuleRepositories.isNotEmpty(),
-                                modifier = Modifier.weight(1f).height(44.dp)
-                            ) {
-                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(17.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(R.string.refresh_all))
-                            }
-                        }
-                        if (state.refreshingBuildModuleRepositoryIds.isNotEmpty()) {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        }
-                        state.buildModuleRepositories.forEach { repository ->
-                            ExpressiveListItem(
-                                title = repository.name.ifBlank { repository.url },
-                                subtitle = repository.indexJsonUrl.ifBlank { repository.url },
-                                leadingIcon = Icons.Default.Dns,
-                                trailingContent = {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        IconButton(onClick = { vm.refreshBuildModuleRepository(repository.id) }) {
-                                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh))
-                                        }
-                                        IconButton(onClick = { vm.deleteBuildModuleRepository(repository.id) }) {
-                                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete))
-                                        }
-                                    }
-                                }
-                            )
                         }
 
                         if (manualGroups.isNotEmpty()) {
@@ -2693,46 +2576,6 @@ private fun buildStatusLabel(status: BuildStatus): String = when (status) {
     BuildStatus.SUCCESS -> stringResource(R.string.build_success)
     BuildStatus.FAILURE -> stringResource(R.string.build_failed)
     BuildStatus.CANCELLED -> stringResource(R.string.build_cancelled)
-}
-
-@Composable
-private fun buildModuleRepoTitle(): String {
-    val context = LocalContext.current
-    return when (LocaleHelper.getLanguage(context)) {
-        LocaleHelper.LANG_ZH -> "ABK 模块仓库"
-        LocaleHelper.LANG_RU -> "Репозиторий модулей ABK"
-        else -> "ABK Module Repo"
-    }
-}
-
-@Composable
-private fun buildModuleRepoDesc(): String {
-    val context = LocalContext.current
-    return when (LocaleHelper.getLanguage(context)) {
-        LocaleHelper.LANG_ZH -> "显示 ABK 模块仓库中的外部模块，可直接加入构建配置。"
-        LocaleHelper.LANG_RU -> "Показывает внешние модули из репозитория ABK и позволяет добавить их в конфигурацию сборки."
-        else -> "Shows external modules from the ABK repository and lets you add them to the build configuration."
-    }
-}
-
-@Composable
-private fun buildModuleRepoManage(): String {
-    val context = LocalContext.current
-    return when (LocaleHelper.getLanguage(context)) {
-        LocaleHelper.LANG_ZH -> "管理 ABK 模块仓库"
-        LocaleHelper.LANG_RU -> "Управление репозиториями модулей ABK"
-        else -> "Manage ABK module repositories"
-    }
-}
-
-@Composable
-private fun buildModuleRepoUrlLabel(): String {
-    val context = LocalContext.current
-    return when (LocaleHelper.getLanguage(context)) {
-        LocaleHelper.LANG_ZH -> "ABK 模块仓库链接"
-        LocaleHelper.LANG_RU -> "Ссылка на репозиторий модулей ABK"
-        else -> "ABK module repository URL"
-    }
 }
 
 @Composable
