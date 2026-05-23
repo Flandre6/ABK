@@ -224,7 +224,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
+          apt_update_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if sudo apt-get update; then
+                return 0
+              fi
+              echo "::warning::apt-get update 第 ${attempt} 次失败，清理索引后重试。"
+              sudo apt-get clean || true
+              sudo rm -rf /var/lib/apt/lists/*
+              sleep "$attempt"
+            done
+            echo "::error::apt-get update 连续失败。"
+            return 1
+          }
+
+          apt_update_retry
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
             python3 git curl ccache libelf-dev build-essential flex bison libssl-dev \
             libncurses-dev liblz4-tool zlib1g-dev libxml2-utils rsync unzip gawk \
@@ -371,6 +386,15 @@ jobs:
               patch -p1 < "50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch" || true
           fi
 
+      - name: 修复 SukiSU SUSFS 源码兼容
+        if: ${{ inputs.ksu_variant == 'SukiSU' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE="$GITHUB_WORKSPACE/oneplus_workspace"
+          KERNEL_ROOT="$WORKSPACE/kernel_workspace/kernel_platform"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/fix_sukisu_susfs.py" "$KERNEL_ROOT"
+
       - name: 修复 SukiSU/ReSukiSU sulog 兼容
         if: ${{ inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'ReSukiSU' }}
         shell: bash
@@ -395,13 +419,14 @@ jobs:
           python3 - "$KSU_BUILD_DIR/sulog/event.c" <<'PY'
           import sys
           from pathlib import Path
+          import re
 
           path = Path(sys.argv[1])
           if not path.exists():
               raise SystemExit(0)
 
           text = path.read_text()
-          old = "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);"
+          marker = "builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer"
           new = "\n".join([
               "    /* ABK: builtin SUSFS ksu_sulog_capture() expects argv_user as a pointer. */",
               "#ifdef CONFIG_KSU_SUSFS",
@@ -410,11 +435,31 @@ jobs:
               "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
               "#endif",
           ])
-          if old in text and "builtin SUSFS ksu_sulog_capture()" not in text:
-              path.write_text(text.replace(old, new, 1))
+
+          changed = False
+          if marker not in text:
+              for old in (
+                  "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL, gfp);",
+                  "    pending = ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, &USER_ARG_NULL, gfp);",
+              ):
+                  if old in text:
+                      text = text.replace(old, new, 1)
+                      changed = True
+                      break
+
+          if changed:
+              path.write_text(text)
               print(f"patched {path}")
           else:
               print(f"no change for {path}")
+
+          final_text = path.read_text()
+          incompatible = re.search(
+              r"pending = ksu_sulog_capture\(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, &?USER_ARG_NULL, gfp\);",
+              final_text,
+          )
+          if incompatible and marker not in final_text:
+              raise SystemExit(f"{path} still contains incompatible ksu_sulog_capture grant_root argv call")
           PY
 
       - name: 配置 defconfig
