@@ -1478,6 +1478,13 @@ private fun RuntimeModuleCatalogItem.downloadFileName(): String {
     return if (base.endsWith(".zip", ignoreCase = true)) base else "${base}-module.zip"
 }
 
+private fun String.repoName(): String =
+    trim()
+        .trimEnd('/')
+        .removeSuffix(".git")
+        .substringAfterLast('/')
+        .ifBlank { trim().trimEnd('/').substringAfterLast('/') }
+
 private data class BuildPageMergedCatalogModule(
     val module: ModuleCatalogItem,
     val sources: List<String>
