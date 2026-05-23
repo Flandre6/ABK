@@ -2,6 +2,7 @@
 
 package com.abk.kernel.ui.screens
 
+import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -105,6 +106,7 @@ import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
 import com.abk.kernel.ui.components.ExpressiveTopBar
 import com.abk.kernel.ui.theme.uiSurfaceColor
+import com.abk.kernel.utils.LocaleHelper
 import com.abk.kernel.utils.DownloadUtils
 import com.abk.kernel.utils.RootUtils
 import com.abk.kernel.viewmodel.MainViewModel
@@ -191,7 +193,7 @@ fun ModuleRepositoryScreen(
             "name: ${module.module.name}",
             "source: ${module.module.zipUrl}",
             "",
-            context.getString(R.string.module_repo_runtime_downloading)
+            runtimeRepoDownloadingLabel(context)
         )
         scope.launch {
             val downloadName = module.module.downloadFileName()
@@ -204,7 +206,7 @@ fun ModuleRepositoryScreen(
                     sizeBytes = 0L,
                     runId = RUNTIME_MODULE_DOWNLOAD_RUN_ID,
                     runTitle = module.sources.firstOrNull().orEmpty().ifBlank {
-                        context.getString(R.string.module_repo_runtime_unknown_source)
+                        runtimeRepoUnknownSourceLabel(context)
                     },
                     downloadDirectoryPath = state.downloadDirectory
                 )
@@ -215,13 +217,13 @@ fun ModuleRepositoryScreen(
                 installSuccess = false
                 installLog = installLog + listOf(
                     "",
-                    downloadResult.errorMessage ?: context.getString(R.string.module_repo_runtime_download_failed)
+                    downloadResult.errorMessage ?: runtimeRepoDownloadFailedLabel(context)
                 )
                 return@launch
             }
 
             appendInstallLog("file: ${downloadedFile.absolutePath}")
-            appendInstallLog(context.getString(R.string.module_repo_runtime_wait_install))
+            appendInstallLog(context.getString(R.string.runtime_wait_root_shell))
             val result = withContext(Dispatchers.IO) {
                 if (!RootUtils.refreshRootState()) {
                     RootUtils.ShellResult(false, listOf(context.getString(R.string.runtime_manager_inactive)))
@@ -315,13 +317,13 @@ fun ModuleRepositoryScreen(
             containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface),
             topBar = {
                 ExpressiveTopBar(
-                    title = stringResource(R.string.module_repo_runtime_title),
+                    title = runtimeRepoTitleLabel(context),
                     scrollBehavior = scrollBehavior,
                     actions = {
                         IconButton(onClick = ::openRepositorySettings) {
                             Icon(
                                 Icons.Default.Dns,
-                                contentDescription = stringResource(R.string.module_repo_runtime_configure)
+                                contentDescription = runtimeRepoConfigureLabel(context)
                             )
                         }
                     }
@@ -350,7 +352,7 @@ fun ModuleRepositoryScreen(
                 },
                 onInstallModule = { module ->
                     if (module.module.zipUrl.isBlank()) {
-                        Toast.makeText(context, context.getString(R.string.module_repo_runtime_no_zip), Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, runtimeRepoNoZipLabel(context), Toast.LENGTH_SHORT).show()
                     } else {
                         pendingInstallModule = module
                     }
@@ -401,7 +403,7 @@ fun ModuleRepositoryScreen(
                     containerColor = Color.Transparent,
                     topBar = {
                         ExpressiveTopBar(
-                            title = stringResource(R.string.module_repo_runtime_central),
+                            title = runtimeRepoCentralLabel(context),
                             navigationIcon = {
                                 IconButton(onClick = ::closeRepositorySettings) {
                                     Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.module_repo_back))
@@ -502,8 +504,8 @@ private fun RuntimeModuleRepositoryEmptyState(
         Text(
             text = when {
                 hasQuery -> stringResource(R.string.module_repo_no_matching)
-                repositoryCount == 0 -> stringResource(R.string.module_repo_runtime_empty_title)
-                totalModules == 0 -> stringResource(R.string.module_repo_runtime_empty_desc)
+                repositoryCount == 0 -> runtimeRepoEmptyTitleLabel(LocalContext.current)
+                totalModules == 0 -> runtimeRepoEmptyDescLabel(LocalContext.current)
                 else -> stringResource(R.string.module_repo_no_display)
             },
             style = MaterialTheme.typography.titleMedium,
@@ -512,7 +514,7 @@ private fun RuntimeModuleRepositoryEmptyState(
         TextButton(onClick = onOpenRepositorySettings) {
             Icon(Icons.Default.Dns, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.module_repo_runtime_manage))
+            Text(runtimeRepoManageLabel(LocalContext.current))
         }
     }
 }
@@ -523,6 +525,7 @@ private fun RuntimeModuleRepositoryListItem(
     onOpen: () -> Unit,
     onInstall: () -> Unit
 ) {
+    val context = LocalContext.current
     val module = merged.module
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -601,7 +604,7 @@ private fun RuntimeModuleRepositoryListItem(
                 module.minApi?.let { ModuleTagChip(label = "API >= $it", secondary = true) }
                 module.maxApi?.let { ModuleTagChip(label = "API <= $it", secondary = true) }
                 if (module.verified) {
-                    ModuleTagChip(label = stringResource(R.string.module_repo_runtime_verified), secondary = true)
+                    ModuleTagChip(label = runtimeRepoVerifiedLabel(LocalContext.current), secondary = true)
                 }
                 if (merged.sources.size > 1) {
                     ModuleTagChip(label = stringResource(R.string.module_repo_source_count, merged.sources.size), secondary = true)
@@ -615,13 +618,13 @@ private fun RuntimeModuleRepositoryListItem(
             ) {
                 CompactModuleActionButton(
                     icon = Icons.Default.OpenInBrowser,
-                    contentDescription = stringResource(R.string.module_repo_runtime_open),
+                    contentDescription = context.getString(R.string.module_repo_open_repo),
                     onClick = onOpen
                 )
                 Spacer(Modifier.width(6.dp))
                 CompactModuleActionButton(
                     icon = Icons.Default.UploadFile,
-                    contentDescription = stringResource(R.string.module_repo_runtime_install),
+                    contentDescription = context.getString(R.string.runtime_install_module),
                     enabled = module.zipUrl.isNotBlank(),
                     onClick = onInstall
                 )
@@ -760,14 +763,14 @@ private fun RuntimeModuleRepositorySettingsPage(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         ExpressiveSectionCard(
-            title = stringResource(R.string.module_repo_runtime_central),
-            subtitle = stringResource(R.string.module_repo_runtime_central_desc),
+            title = runtimeRepoCentralLabel(LocalContext.current),
+            subtitle = runtimeRepoCentralDescLabel(LocalContext.current),
             icon = Icons.Default.Dns
         ) {
             OutlinedTextField(
                 value = repositoryUrl,
                 onValueChange = { repositoryUrl = it },
-                label = { Text(stringResource(R.string.module_repo_runtime_url)) },
+                label = { Text(runtimeRepoUrlLabel(LocalContext.current)) },
                 placeholder = { Text("https://example.com/modules.json") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -803,12 +806,12 @@ private fun RuntimeModuleRepositorySettingsPage(
 
         if (repositories.isEmpty()) {
             ExpressiveSectionCard(
-                title = stringResource(R.string.module_repo_runtime_empty_title),
-                subtitle = stringResource(R.string.module_repo_runtime_empty_desc),
+                title = runtimeRepoEmptyTitleLabel(LocalContext.current),
+                subtitle = runtimeRepoEmptyDescLabel(LocalContext.current),
                 icon = Icons.Default.Extension
             ) {
                 Text(
-                    text = stringResource(R.string.module_repo_runtime_central_desc),
+                    text = runtimeRepoCentralDescLabel(LocalContext.current),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -911,10 +914,11 @@ private fun RuntimeRepositoryInstallConfirmDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.UploadFile, null) },
-        title = { Text(stringResource(R.string.module_repo_runtime_confirm_install)) },
+        title = { Text(runtimeRepoConfirmInstallTitle(context)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -932,11 +936,9 @@ private fun RuntimeRepositoryInstallConfirmDialog(
                     )
                 }
                 Text(
-                    text = stringResource(
-                        R.string.module_repo_runtime_source,
-                        module.sources.firstOrNull()
-                            ?: stringResource(R.string.module_repo_runtime_unknown_source)
-                    ),
+                    text = "${context.getString(R.string.runtime_source)}: ${
+                        module.sources.firstOrNull() ?: runtimeRepoUnknownSourceLabel(context)
+                    }",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -955,7 +957,7 @@ private fun RuntimeRepositoryInstallConfirmDialog(
                     )
                 }
                 Text(
-                    text = stringResource(R.string.module_repo_runtime_confirm_install_desc),
+                    text = context.getString(R.string.runtime_confirm_flash_module_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -965,7 +967,7 @@ private fun RuntimeRepositoryInstallConfirmDialog(
             Button(onClick = onConfirm) {
                 Icon(Icons.Default.UploadFile, null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.module_repo_runtime_install))
+                Text(context.getString(R.string.runtime_install_module))
             }
         },
         dismissButton = {
@@ -1012,7 +1014,7 @@ private fun RuntimeRepositoryInstallDialog(
                 if (running) {
                     stringResource(R.string.runtime_installing_module)
                 } else {
-                    stringResource(R.string.module_repo_runtime_install)
+                    stringResource(R.string.runtime_install_module)
                 }
             )
         },
@@ -1160,3 +1162,101 @@ private fun RuntimeModuleCatalogItem.downloadFileName(): String {
         .ifBlank { "module" }
     return if (base.endsWith(".zip", ignoreCase = true)) base else "${base}-module.zip"
 }
+
+private fun runtimeRepoTitleLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "普通模块仓库"
+        LocaleHelper.LANG_RU -> "Репозиторий обычных модулей"
+        else -> "Standard Module Repo"
+    }
+
+private fun runtimeRepoConfigureLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "配置普通模块仓库"
+        LocaleHelper.LANG_RU -> "Настроить репозитории обычных модулей"
+        else -> "Configure standard module repositories"
+    }
+
+private fun runtimeRepoCentralLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "普通模块中央仓库"
+        LocaleHelper.LANG_RU -> "Центральный репозиторий обычных модулей"
+        else -> "Standard module central repository"
+    }
+
+private fun runtimeRepoCentralDescLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "添加符合 Magisk 标准 JSON 格式的普通模块仓库。"
+        LocaleHelper.LANG_RU -> "Добавьте репозиторий обычных модулей в стандартном формате JSON Magisk."
+        else -> "Add standard module repositories that expose the Magisk JSON format."
+    }
+
+private fun runtimeRepoUrlLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "普通模块仓库链接"
+        LocaleHelper.LANG_RU -> "Ссылка на репозиторий обычных модулей"
+        else -> "Standard module repository URL"
+    }
+
+private fun runtimeRepoEmptyTitleLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "暂无普通模块仓库"
+        LocaleHelper.LANG_RU -> "Нет репозиториев обычных модулей"
+        else -> "No standard module repositories"
+    }
+
+private fun runtimeRepoEmptyDescLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "添加普通模块仓库后，模块会在这里合并展示并支持下载安装。"
+        LocaleHelper.LANG_RU -> "После добавления репозитория обычных модулей они будут показаны здесь и смогут скачиваться для установки."
+        else -> "After adding a standard module repository, modules are merged here and can be downloaded for installation."
+    }
+
+private fun runtimeRepoManageLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "管理普通模块仓库"
+        LocaleHelper.LANG_RU -> "Управление репозиториями обычных модулей"
+        else -> "Manage standard module repositories"
+    }
+
+private fun runtimeRepoDownloadingLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "正在下载模块..."
+        LocaleHelper.LANG_RU -> "Скачивание модуля…"
+        else -> "Downloading module..."
+    }
+
+private fun runtimeRepoDownloadFailedLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "模块下载失败"
+        LocaleHelper.LANG_RU -> "Не удалось скачать модуль"
+        else -> "Module download failed"
+    }
+
+private fun runtimeRepoUnknownSourceLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "未知来源"
+        LocaleHelper.LANG_RU -> "Неизвестный источник"
+        else -> "Unknown source"
+    }
+
+private fun runtimeRepoNoZipLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "该模块仓库项没有可安装的 ZIP 链接"
+        LocaleHelper.LANG_RU -> "У этой записи репозитория нет ZIP для установки"
+        else -> "This repository entry does not expose an installable ZIP URL"
+    }
+
+private fun runtimeRepoVerifiedLabel(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "已验证"
+        LocaleHelper.LANG_RU -> "Проверен"
+        else -> "Verified"
+    }
+
+private fun runtimeRepoConfirmInstallTitle(context: Context): String =
+    when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "确认下载安装"
+        LocaleHelper.LANG_RU -> "Подтвердить скачивание и установку"
+        else -> "Confirm download and install"
+    }

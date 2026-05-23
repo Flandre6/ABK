@@ -3365,7 +3365,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val repository = ModuleCatalogRepository(
             id = UUID.randomUUID().toString(),
             url = cleanUrl,
-            name = cleanUrl.moduleCatalogFallbackName(text(R.string.module_repo_build_title))
+            name = cleanUrl.moduleCatalogFallbackName(localizedBuildModuleRepoTitle())
         )
         saveBuildModuleRepositories(current + repository)
         refreshBuildModuleRepository(repository.id)
@@ -3546,7 +3546,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val repository = RuntimeModuleRepository(
             id = UUID.randomUUID().toString(),
             url = cleanUrl,
-            name = cleanUrl.moduleCatalogFallbackName(text(R.string.module_repo_runtime_title))
+            name = cleanUrl.moduleCatalogFallbackName(localizedRuntimeModuleRepoTitle())
         )
         saveRuntimeModuleRepositories(current + repository)
         refreshRuntimeModuleRepository(repository.id)
@@ -3892,7 +3892,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     id = repository.id.ifBlank { UUID.randomUUID().toString() },
                     url = url,
                     indexJsonUrl = repository.indexJsonUrl.trim(),
-                    name = repository.name.trim().ifBlank { url.moduleCatalogFallbackName(text(R.string.module_repo_runtime_title)) },
+                    name = repository.name.trim().ifBlank { url.moduleCatalogFallbackName(localizedRuntimeModuleRepoTitle()) },
                     modules = modules,
                     lastUpdated = repository.lastUpdated.takeIf { it > 0L } ?: 0L,
                     error = repository.error?.takeIf { it.isNotBlank() },
@@ -3930,7 +3930,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         RuntimeModuleRepository(
             id = OFFICIAL_RUNTIME_MODULE_REPOSITORY_ID,
             url = OFFICIAL_RUNTIME_MODULE_REPOSITORY_URL,
-            name = text(R.string.vm_runtime_module_repo)
+            name = localizedRuntimeModuleRepoTitle()
         )
     )
 
@@ -3959,7 +3959,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     id = repository.id.ifBlank { UUID.randomUUID().toString() },
                     url = url,
                     indexJsonUrl = repository.indexJsonUrl.trim(),
-                    name = repository.name.trim().ifBlank { url.moduleCatalogFallbackName(text(R.string.module_repo_build_title)) },
+                    name = repository.name.trim().ifBlank { url.moduleCatalogFallbackName(localizedBuildModuleRepoTitle()) },
                     modules = modules,
                     lastUpdated = repository.lastUpdated.takeIf { it > 0L } ?: 0L,
                     error = repository.error?.takeIf { it.isNotBlank() },
@@ -3989,7 +3989,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .filter { it in supportedStages }
             .ifEmpty { listOf(defaultStage) }
         return item.copy(
-            name = item.name.trim().ifBlank { repoUrl.moduleCatalogFallbackName(text(R.string.module_repo_build_title)) },
+            name = item.name.trim().ifBlank { repoUrl.moduleCatalogFallbackName(localizedBuildModuleRepoTitle()) },
             version = item.version.trim(),
             description = item.description.trim(),
             repoUrl = repoUrl,
@@ -4132,6 +4132,20 @@ internal fun String.moduleCatalogFallbackName(fallback: String = "Module reposit
     .removeSuffix(".git")
     .removeSuffix(".json")
     .ifBlank { fallback }
+
+private fun MainViewModel.localizedRuntimeModuleRepoTitle(): String =
+    when (LocaleHelper.getLanguage(getApplication())) {
+        LocaleHelper.LANG_ZH -> "普通模块仓库"
+        LocaleHelper.LANG_RU -> "Репозиторий обычных модулей"
+        else -> "Standard Module Repo"
+    }
+
+private fun MainViewModel.localizedBuildModuleRepoTitle(): String =
+    when (LocaleHelper.getLanguage(getApplication())) {
+        LocaleHelper.LANG_ZH -> "ABK 模块仓库"
+        LocaleHelper.LANG_RU -> "Репозиторий модулей ABK"
+        else -> "ABK Module Repo"
+    }
 
 private fun padBase64Url(value: String): String =
     value + "=".repeat((4 - value.length % 4) % 4)

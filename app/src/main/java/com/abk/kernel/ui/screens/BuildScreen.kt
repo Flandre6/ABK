@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.abk.kernel.R
+import com.abk.kernel.utils.LocaleHelper
 import com.abk.kernel.data.model.BuildPlan
 import com.abk.kernel.data.model.BuildQueueItem
 import com.abk.kernel.data.model.BuildQueueItemStatus
@@ -1097,13 +1098,13 @@ fun BuildScreen(
                         if (catalogModules.isNotEmpty()) {
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             Text(
-                                text = stringResource(R.string.module_repo_build_title),
+                                text = buildModuleRepoTitle(),
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = stringResource(R.string.module_repo_build_desc),
+                                text = buildModuleRepoDesc(),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1152,7 +1153,7 @@ fun BuildScreen(
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text(
-                            text = stringResource(R.string.module_repo_build_manage),
+                            text = buildModuleRepoManage(),
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -1160,7 +1161,7 @@ fun BuildScreen(
                         OutlinedTextField(
                             value = buildRepositoryUrl,
                             onValueChange = { buildRepositoryUrl = it },
-                            label = { Text(stringResource(R.string.module_repo_build_url)) },
+                            label = { Text(buildModuleRepoUrlLabel()) },
                             placeholder = { Text("https://github.com/user/abk-module-catalog") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
@@ -2692,6 +2693,46 @@ private fun buildStatusLabel(status: BuildStatus): String = when (status) {
     BuildStatus.SUCCESS -> stringResource(R.string.build_success)
     BuildStatus.FAILURE -> stringResource(R.string.build_failed)
     BuildStatus.CANCELLED -> stringResource(R.string.build_cancelled)
+}
+
+@Composable
+private fun buildModuleRepoTitle(): String {
+    val context = LocalContext.current
+    return when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "ABK 模块仓库"
+        LocaleHelper.LANG_RU -> "Репозиторий модулей ABK"
+        else -> "ABK Module Repo"
+    }
+}
+
+@Composable
+private fun buildModuleRepoDesc(): String {
+    val context = LocalContext.current
+    return when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "显示 ABK 模块仓库中的外部模块，可直接加入构建配置。"
+        LocaleHelper.LANG_RU -> "Показывает внешние модули из репозитория ABK и позволяет добавить их в конфигурацию сборки."
+        else -> "Shows external modules from the ABK repository and lets you add them to the build configuration."
+    }
+}
+
+@Composable
+private fun buildModuleRepoManage(): String {
+    val context = LocalContext.current
+    return when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "管理 ABK 模块仓库"
+        LocaleHelper.LANG_RU -> "Управление репозиториями модулей ABK"
+        else -> "Manage ABK module repositories"
+    }
+}
+
+@Composable
+private fun buildModuleRepoUrlLabel(): String {
+    val context = LocalContext.current
+    return when (LocaleHelper.getLanguage(context)) {
+        LocaleHelper.LANG_ZH -> "ABK 模块仓库链接"
+        LocaleHelper.LANG_RU -> "Ссылка на репозиторий модулей ABK"
+        else -> "ABK module repository URL"
+    }
 }
 
 @Composable
