@@ -172,8 +172,9 @@ object DownloadUtils {
             outDir = targetOutDir
             if (targetOutDir.exists()) targetOutDir.deleteRecursively()
             targetOutDir.mkdirs()
-            unzip(zipFile!!, targetOutDir)
-            zipFile.delete()
+            val downloadedZip = requireNotNull(zipFile)
+            unzip(downloadedZip, targetOutDir)
+            downloadedZip.delete()
             zipFile = null
 
             DownloadResult(
@@ -266,17 +267,18 @@ object DownloadUtils {
                 cancellationHandle.dispose()
             }
 
-            val byName = classifyDownloadedFile(file!!)
-            val files = if (file.extension.equals("zip", ignoreCase = true) && byName in setOf(ArtifactType.KERNEL_PACKAGE, ArtifactType.OTHER)) {
+            val downloadedFile = requireNotNull(file)
+            val byName = classifyDownloadedFile(downloadedFile)
+            val files = if (downloadedFile.extension.equals("zip", ignoreCase = true) && byName in setOf(ArtifactType.KERNEL_PACKAGE, ArtifactType.OTHER)) {
                 val extractedDir = File(requireNotNull(assetDir), "extracted")
                 outDir = extractedDir
                 extractedDir.mkdirs()
-                unzip(file, extractedDir)
-                file.delete()
+                unzip(downloadedFile, extractedDir)
+                downloadedFile.delete()
                 file = null
                 collectCandidateFiles(extractedDir)
             } else {
-                listOf(file!!)
+                listOf(downloadedFile)
             }
 
             DownloadResult(
