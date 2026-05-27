@@ -795,9 +795,6 @@ private fun ManagerInjectedSettingsGroup(
                             "app_profile_templates" -> onOpenAppProfileTemplates()
                             "manager_tools" -> onOpenManagerTools()
                             "kpm" -> onOpenInstalledModules()
-                            "lsp_targets" -> onOpenAppProfileTemplates()
-                            "lsp_diagnostics" -> onOpenManagerTools()
-                            "lsp_plugins" -> onOpenInstalledModules()
                         }
                     }
                 )
