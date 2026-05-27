@@ -29,7 +29,7 @@ import com.abk.kernel.R
 import com.abk.kernel.ui.components.ExpressiveHeroCard
 import com.abk.kernel.ui.components.ExpressiveSectionCard
 import com.abk.kernel.ui.components.ExpressiveStatusChip
-import com.abk.kernel.ui.theme.uiSurfaceColor
+import com.abk.kernel.ui.theme.LocalUiSurfaceAlpha
 import com.abk.kernel.viewmodel.AuthStep
 import com.abk.kernel.viewmodel.MainViewModel
 
@@ -278,23 +278,25 @@ private fun LoginScreen(
 
 @Composable
 private fun AuthShell(content: @Composable ColumnScope.() -> Unit) {
-    Scaffold(containerColor = uiSurfaceColor(MaterialTheme.colorScheme.surface)) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(uiSurfaceColor(MaterialTheme.colorScheme.surface))
-                .padding(padding),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
+    CompositionLocalProvider(LocalUiSurfaceAlpha provides 1f) {
+        Scaffold(containerColor = MaterialTheme.colorScheme.surface) { padding ->
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 24.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-                content = content
-            )
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 24.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    content = content
+                )
+            }
         }
     }
 }
