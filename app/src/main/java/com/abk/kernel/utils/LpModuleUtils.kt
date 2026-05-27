@@ -74,8 +74,9 @@ object LpModuleUtils {
     }
 
     private fun getModernModuleApk(info: ApplicationInfo): ZipFile? {
-        val apks = if (info.splitSourceDirs != null) {
-            info.splitSourceDirs + info.sourceDir
+        val splitSourceDirs = info.splitSourceDirs
+        val apks = if (splitSourceDirs != null) {
+            splitSourceDirs + info.sourceDir
         } else {
             arrayOf(info.sourceDir)
         }
