@@ -718,10 +718,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val kpmModules = parseKpmModules()
         val mergedModules = mergeRuntimeModules(controlModules, ksuModules, kpmModules)
         val runtimeBackendInfo = manager.toRuntimeInfo()
-        val managerInfo = controlStatus?.manager?.let { compilerManager ->
+        val controlManagerInfo = controlStatus?.manager?.let { compilerManager ->
             val extraCaps = when (manager.backend) {
                 "native" -> listOf("native_manager", "root_policy")
                 "su", "ksud" -> listOf("root_shell")
+                "lsp_bridge" -> listOf("abk_control")
                 else -> emptyList()
             }
             compilerManager.copy(
@@ -729,13 +730,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 capabilities = (compilerManager.capabilities + extraCaps).distinct(),
                 diagnostics = (compilerManager.diagnostics + manager.diagnostics).distinct()
             )
-        } ?: runtimeBackendInfo
+        }
+        val managerInfo = if (manager.backend == "lsp_bridge") {
+            runtimeBackendInfo.copy(
+                capabilities = (runtimeBackendInfo.capabilities + controlManagerInfo?.capabilities.orEmpty()).distinct(),
+                diagnostics = (runtimeBackendInfo.diagnostics + controlManagerInfo?.diagnostics.orEmpty()).distinct()
+            )
+        } else {
+            controlManagerInfo ?: runtimeBackendInfo
+        }
+        val compatBackendInfo = if (manager.backend == "lsp_bridge") {
+            controlManagerInfo
+        } else {
+            runtimeBackendInfo
+        }
         return (controlStatus ?: AbkRuntimeStatus()).copy(
             schema = maxOf(controlStatus?.schema ?: 0, 4),
             abkVersion = controlStatus?.abkVersion?.ifBlank { BuildConfig.VERSION_NAME } ?: BuildConfig.VERSION_NAME,
             workMode = resolveRuntimeWorkMode(controlStatus?.workMode, manager),
             manager = managerInfo,
-            runtimeBackend = runtimeBackendInfo,
+            runtimeBackend = compatBackendInfo,
             modules = mergedModules
         )
     }

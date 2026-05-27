@@ -568,23 +568,21 @@ object RootUtils {
     }
 
     private fun readAbkLspBridgeStatus(): ShellResult? {
-        return try {
-            createRootShell(timeoutSeconds = 10L).use { shell ->
-                val result = execWithShell(
-                    shell = shell,
-                    script = "cat /dev/abk_lsp_bridge 2>/dev/null || true",
-                    normalizeOutput = false
-                )
-                val body = result.output.joinToString("\n").trim()
-                if (body.startsWith("{")) {
-                    ShellResult(true, listOf(body))
-                } else {
-                    null
+        val control = readAbkControlStatus()
+        if (!control.success) return null
+        val body = control.output.joinToString("\n").trim()
+        if (!body.startsWith("{")) return null
+        return runCatching {
+            val root = JSONObject(body)
+            val modules = root.optJSONArray("modules") ?: return@runCatching null
+            for (index in 0 until modules.length()) {
+                val item = modules.optJSONObject(index) ?: continue
+                if (item.optString("id") == "abk_lsp_bridge") {
+                    return@runCatching ShellResult(true, listOf(body))
                 }
             }
-        } catch (_: Throwable) {
             null
-        }
+        }.getOrNull()
     }
 
     fun readManagerRuntimeSnapshot(): ManagerRuntimeSnapshot {
@@ -1388,13 +1386,13 @@ object RootUtils {
 
     private fun detectManagerRuntime(): ManagerRuntimeProbe {
         val nativeRuntime = detectNativeManagerRuntime()
-        if (nativeRuntime?.active == true) {
-            return nativeRuntime
-        }
-
-        val lspBridgeRuntime = detectLspBridgeRuntime()
+        val lspBridgeRuntime = detectLspBridgeRuntime(nativeRuntime)
         if (lspBridgeRuntime != null) {
             return lspBridgeRuntime
+        }
+
+        if (nativeRuntime?.active == true) {
+            return nativeRuntime
         }
 
         val shellRuntime = detectShellManagerRuntime(nativeRuntime)
@@ -1407,7 +1405,10 @@ object RootUtils {
         )
     }
 
-    private fun detectLspBridgeRuntime(): ManagerRuntimeProbe? {
+    private fun detectLspBridgeRuntime(
+        nativeRuntime: ManagerRuntimeProbe?
+    ): ManagerRuntimeProbe? {
+        if (nativeRuntime?.active != true) return null
         val raw = readAbkLspBridgeStatus()
             ?.takeIf { it.success }
             ?.output
@@ -1418,40 +1419,46 @@ object RootUtils {
 
         return runCatching {
             val root = JSONObject(raw)
-            val manager = root.optJSONObject("manager")
-            val displayName = manager?.optString("display_name").orEmpty().ifBlank { "ABK LSP Bridge" }
-            val variant = manager?.optString("variant").orEmpty().ifBlank { displayName }
-            val backend = manager?.optString("backend").orEmpty().ifBlank { "lsp_bridge" }
-            val version = manager?.optString("version").orEmpty()
-            val capabilities = manager
-                ?.optJSONArray("capabilities")
-                ?.let { array ->
-                    buildList {
-                        for (index in 0 until array.length()) {
-                            array.optString(index)?.trim()?.takeIf { it.isNotBlank() }?.let(::add)
-                        }
-                    }
+            val modules = root.optJSONArray("modules") ?: return@runCatching null
+            var module: JSONObject? = null
+            for (index in 0 until modules.length()) {
+                val item = modules.optJSONObject(index) ?: continue
+                if (item.optString("id") == "abk_lsp_bridge") {
+                    module = item
+                    break
                 }
-                .orEmpty()
-            val diagnostics = manager
-                ?.optJSONArray("diagnostics")
-                ?.let { array ->
-                    buildList {
-                        for (index in 0 until array.length()) {
-                            array.optString(index)?.trim()?.takeIf { it.isNotBlank() }?.let(::add)
-                        }
-                    }
-                }
-                .orEmpty()
+            }
+            val bridge = module ?: return@runCatching null
+
+            val displayName = bridge.optString("name").ifBlank { "ABK LSP Bridge" }
+            val variant = "ABK LSP Bridge"
+            val backend = "lsp_bridge"
+            val version = bridge.optString("version").ifBlank { "0.1.0" }
+            val capabilities = buildList {
+                add("lsp_bridge")
+                add("zygote_helper")
+                add("plugin_bridge")
+                add("hook_policies")
+                add("abk_control")
+                add("native_manager")
+                add("root_policy")
+            }.distinct()
+            val diagnostics = buildList {
+                bridge.optString("description")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.let(::add)
+                add("rpc bridge via abk_control active")
+            }
 
             ManagerRuntimeProbe(
-                active = true,
+                active = bridge.optBoolean("enabled", true),
                 displayName = displayName,
                 variant = variant,
                 backend = backend,
                 version = version,
-                workMode = root.optString("work_mode").orEmpty().ifBlank { "built-in" },
-                capabilities = capabilities.ifEmpty { listOf("lsp_bridge", "zygote_helper", "plugin_bridge") },
+                workMode = root.optString("work_mode").orEmpty().ifBlank { nativeRuntime.workMode.ifBlank { "built-in" } },
+                capabilities = capabilities,
                 diagnostics = diagnostics
             )
         }.getOrNull()
