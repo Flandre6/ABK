@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -835,35 +837,48 @@ private fun RuntimeModuleRepositoryListContent(
     bottomPadding: Dp
 ) {
     val showInitialLoading = computing || (refreshing && totalModules == 0 && searchQuery.isBlank())
-    Column(
+    LazyColumn(
         modifier = Modifier
             .padding(padding)
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection)
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = AbkScreenHorizontalPadding),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = bottomPadding + 24.dp)
     ) {
-        CompactModuleSearchField(
-            value = searchQuery,
-            onValueChange = onSearchQueryChange
-        )
+        item(key = "search") {
+            CompactModuleSearchField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange
+            )
+        }
 
         if (refreshing && !showInitialLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            item(key = "refreshing") {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
 
         if (showInitialLoading) {
-            ModuleRepositoryInitialLoading()
+            item(key = "initial-loading") {
+                ModuleRepositoryInitialLoading()
+            }
         } else if (modules.isEmpty()) {
-            RuntimeModuleRepositoryEmptyState(
-                totalModules = totalModules,
-                repositoryCount = repositories.size,
-                hasQuery = searchQuery.isNotBlank(),
-                onOpenRepositorySettings = onOpenRepositorySettings
-            )
+            item(key = "empty") {
+                RuntimeModuleRepositoryEmptyState(
+                    totalModules = totalModules,
+                    repositoryCount = repositories.size,
+                    hasQuery = searchQuery.isNotBlank(),
+                    onOpenRepositorySettings = onOpenRepositorySettings
+                )
+            }
         } else {
-            modules.forEach { merged ->
+            items(
+                items = modules,
+                key = { merged ->
+                    "${merged.module.id.trim().lowercase().ifBlank { merged.module.name.trim().lowercase() }}-${merged.sources.joinToString("|")}"
+                }
+            ) { merged ->
                 RuntimeModuleRepositoryListItem(
                     merged = merged,
                     onOpen = { onOpenModule(merged) },
@@ -871,8 +886,6 @@ private fun RuntimeModuleRepositoryListContent(
                 )
             }
         }
-
-        Spacer(Modifier.height(bottomPadding + 24.dp))
     }
 }
 
@@ -1641,58 +1654,71 @@ private fun BuildModuleRepositoryListContent(
 ) {
     val context = LocalContext.current
     val showInitialLoading = computing || (refreshing && totalModules == 0 && searchQuery.isBlank())
-    Column(
+    LazyColumn(
         modifier = Modifier
             .padding(padding)
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection)
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = AbkScreenHorizontalPadding),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = bottomPadding + 24.dp)
     ) {
-        CompactModuleSearchField(
-            value = searchQuery,
-            onValueChange = onSearchQueryChange
-        )
+        item(key = "search") {
+            CompactModuleSearchField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange
+            )
+        }
 
         if (refreshing && !showInitialLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            item(key = "refreshing") {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
 
         if (showInitialLoading) {
-            ModuleRepositoryInitialLoading()
+            item(key = "initial-loading") {
+                ModuleRepositoryInitialLoading()
+            }
         } else if (modules.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Extension,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(38.dp)
-                )
-                Text(
-                    text = when {
-                        searchQuery.isNotBlank() -> context.getString(R.string.module_repo_no_matching)
-                        repositories.isEmpty() -> buildRepoEmptyTitleLabel(context)
-                        totalModules == 0 -> context.getString(R.string.module_repo_refresh_hint)
-                        else -> context.getString(R.string.module_repo_no_display)
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                TextButton(onClick = onOpenRepositorySettings) {
-                    Icon(Icons.Default.Dns, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(buildRepoManageLabel(context))
+            item(key = "empty") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Extension,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(38.dp)
+                    )
+                    Text(
+                        text = when {
+                            searchQuery.isNotBlank() -> context.getString(R.string.module_repo_no_matching)
+                            repositories.isEmpty() -> buildRepoEmptyTitleLabel(context)
+                            totalModules == 0 -> context.getString(R.string.module_repo_refresh_hint)
+                            else -> context.getString(R.string.module_repo_no_display)
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    TextButton(onClick = onOpenRepositorySettings) {
+                        Icon(Icons.Default.Dns, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(buildRepoManageLabel(context))
+                    }
                 }
             }
         } else {
-            modules.forEach { merged ->
+            items(
+                items = modules,
+                key = { merged ->
+                    merged.module.repoUrl.trim().lowercase()
+                }
+            ) { merged ->
                 val module = merged.module
                 val supportedStages = module.buildNormalizedSupportedStages()
                 val allStagesAdded = supportedStages.all { stage ->
@@ -1812,8 +1838,6 @@ private fun BuildModuleRepositoryListContent(
                 }
             }
         }
-
-        Spacer(Modifier.height(bottomPadding + 24.dp))
     }
 }
 
