@@ -162,7 +162,16 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                             if (state.showOobe) {
-                                OobeScreen(vm)
+                                CompositionLocalProvider(LocalUiSurfaceAlpha provides 1f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .zIndex(4f)
+                                    ) {
+                                        OobeScreen(vm)
+                                    }
+                                }
                             }
                         }
                     }
