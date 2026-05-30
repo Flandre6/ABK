@@ -2979,6 +2979,8 @@ jobs:
               )
               text = text.replace("ksu_handle_sys_read(fd, buf_ptr, count_ptr);", "ksu_handle_sys_read(fd);")
               text = ensure_include(text, "#include <linux/static_key.h>", "#include <linux/printk.h>\n")
+              if "register_kprobe(" in text or "unregister_kprobe(" in text or "struct kprobe" in text:
+                  text = ensure_include(text, "#include <linux/kprobes.h>", "#include <linux/input-event-codes.h>\n")
 
               if "DEFINE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);" not in text:
                   block = dedent("""\
@@ -3009,7 +3011,11 @@ jobs:
                   else:
                       raise SystemExit(f"{path} 缺少 runtime 声明插入锚点")
 
-              if not re.search(r"(?m)^void\s+ksu_handle_vfs_fstat\s*\(", text):
+              if (
+                  not re.search(r"(?m)^void\s+ksu_handle_vfs_fstat\s*\(", text)
+                  or "orig_sys_fstat(" in text
+                  or "statbuf" in text
+              ):
                   load_module = "        load_module_rc_once();\n" if "load_module_rc_once(" in text else ""
                   extra_expr = "ksu_rc_len + module_rc_len" if "module_rc_len" in text else "ksu_rc_len"
                   log_args = (
@@ -3043,14 +3049,25 @@ jobs:
                       "    fput(file);\n"
                       "}\n\n"
                   )
-                  for anchor in (
-                      "\nstatic long (*orig_sys_read)(const struct pt_regs *regs);",
-                      "\nstatic unsigned int volumedown_pressed_count",
+                  replaced = False
+                  for signature in (
+                      "void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr)",
+                      "static long ksu_sys_fstat(const struct pt_regs *regs)",
                   ):
-                      if anchor in text:
-                          text = text.replace(anchor, "\n" + block + anchor.lstrip("\n"), 1)
+                      if re.search(re.escape(signature) + r"\s*\{", text):
+                          text = replace_first_function(text, (signature,), block)
+                          replaced = True
                           break
-                  else:
+                  if not replaced:
+                      for anchor in (
+                          "\nstatic long (*orig_sys_read)(const struct pt_regs *regs);",
+                          "\nstatic unsigned int volumedown_pressed_count",
+                      ):
+                          if anchor in text:
+                              text = text.replace(anchor, "\n" + block + anchor.lstrip("\n"), 1)
+                              replaced = True
+                              break
+                  if not replaced:
                       raise SystemExit(f"{path} 缺少 ksu_handle_vfs_fstat 插入锚点")
 
               if "ksu init rc inline hook disabled" not in text and "ksu_syscall_table_unhook(" in text:
@@ -3453,6 +3470,8 @@ jobs:
                   raise SystemExit(f"{runtime_c} 缺少单参数 ksu_handle_sys_read 导出")
               if not re.search(r"(?m)^void\s+ksu_handle_vfs_fstat\s*\(", runtime_text):
                   raise SystemExit(f"{runtime_c} 缺少 ksu_handle_vfs_fstat 导出")
+              if "orig_sys_fstat(" in runtime_text or "statbuf" in runtime_text:
+                  raise SystemExit(f"{runtime_c} 仍残留旧版 fstat hook 体")
               required_runtime = []
               if "ksu_syscall_table_unhook(" in runtime_text:
                   required_runtime.append("ksu init rc inline hook disabled")
