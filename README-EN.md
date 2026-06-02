@@ -313,4 +313,4 @@ Web dependencies are derived from `web/package-lock.json`.
 
 ## License
 
-ABK is released under GPL-2.0. This repository also references third-party projects, patches, binary sources, and package dependencies. Before using, redistributing, or modifying them, follow the license and terms of each upstream project. Users are responsible for any device damage, data loss, account risk, service interruption, compliance issue, or direct/indirect loss caused by using ABK, its workflows, custom modules, or generated artifacts.
+ABK is released under GPL-3.0. This repository also references third-party projects, patches, binary sources, and package dependencies. Before using, redistributing, or modifying them, follow the license and terms of each upstream project. Users are responsible for any device damage, data loss, account risk, service interruption, compliance issue, or direct/indirect loss caused by using ABK, its workflows, custom modules, or generated artifacts.
