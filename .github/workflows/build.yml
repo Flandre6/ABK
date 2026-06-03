@@ -3341,6 +3341,8 @@ jobs:
 
               text = kbuild.read_text()
               missing = []
+              if "feature/selinux_hide.o" not in text:
+                  missing.append("kernelsu-objs += feature/selinux_hide.o")
               if "hook/lsm_hook.o" not in text:
                   missing.append("kernelsu-objs += hook/lsm_hook.o")
               if "hook/arm64/patch_memory.o" not in text:
