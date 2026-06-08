@@ -13,8 +13,8 @@
   },
   "unstable": {
     "normal": {
-      "versionName": "1.2.1",
-      "versionCode": 10021,
+      "versionName": "1.2.2",
+      "versionCode": 10022,
       "downloadUrl": "https://nightly.link/xingguangcuican6666/ABK/workflows/build-abk-app/dev/abk-apks.zip",
       "publishedAt": "2026-06-08T06:40:39Z",
       "buildTimestampEpochMillis": 1780900839000,
@@ -23,8 +23,8 @@
       "runId": 27120511003
     },
     "dev": {
-      "versionName": "1.2.1",
-      "versionCode": 10021,
+      "versionName": "1.2.2-dev",
+      "versionCode": 10022,
       "downloadUrl": "https://nightly.link/xingguangcuican6666/ABK/workflows/build-abk-app-dev/dev/abk-apks.zip",
       "publishedAt": "2026-06-08T06:40:40Z",
       "buildTimestampEpochMillis": 1780900840000,
