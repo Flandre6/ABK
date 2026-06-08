@@ -141,7 +141,8 @@ object DownloadUtils {
 
     fun matchesDownloadedPrebuilt(downloaded: DownloadedArtifact, asset: PrebuiltGkiAsset): Boolean =
         downloaded.runId == PREBUILT_GKI_RUN_ID && (
-            downloaded.sourceAssetName?.trim() == asset.name ||
+            (downloaded.sourceAssetId > 0L && downloaded.sourceAssetId == asset.id) ||
+                downloaded.sourceAssetName?.trim() == asset.name ||
                 downloaded.filePath.contains("/prebuilt-gki/${artifactStorageFolderName(asset.name)}/")
         )
 
@@ -324,6 +325,7 @@ object DownloadUtils {
         sizeBytes: Long,
         runId: Long,
         runTitle: String,
+        sourceAssetId: Long = 0L,
         downloadDirectoryPath: String? = null,
         bundleWithNotices: Boolean = false,
         onProgress: (Int) -> Unit = {}
@@ -469,6 +471,7 @@ object DownloadUtils {
                         runId = runId,
                         runTitle = runTitle,
                         runNumber = 0,
+                        sourceAssetId = sourceAssetId,
                         sourceAssetName = name,
                         category = entry.type.toArtifactCategory()
                     )

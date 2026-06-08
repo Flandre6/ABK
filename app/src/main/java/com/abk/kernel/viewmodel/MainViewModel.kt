@@ -2073,6 +2073,7 @@ class MainViewModel @JvmOverloads constructor(
                 asset.sizeBytes,
                 PREBUILT_GKI_RUN_ID,
                 text(R.string.vm_prebuilt_gki_label),
+                sourceAssetId = asset.id,
                 downloadDirectory,
                 bundleWithNotices = true
             ) { pct ->

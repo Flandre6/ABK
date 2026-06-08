@@ -70,6 +70,7 @@ class DownloadAndProgressUtilsTest {
             sizeBytes = 1L,
             runId = PREBUILT_GKI_RUN_ID,
             runTitle = "预编译 GKI",
+            sourceAssetId = asset.id,
             sourceAssetName = asset.name,
             category = ArtifactType.KERNEL_IMG.toArtifactCategory()
         )
