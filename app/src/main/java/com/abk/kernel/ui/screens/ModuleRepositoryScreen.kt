@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -96,8 +98,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.abk.kernel.R
 import com.abk.kernel.data.model.CustomExternalModuleStage
+import com.abk.kernel.data.model.ExternalModuleMetadata
+import com.abk.kernel.data.model.ModuleCatalogItemKind
 import com.abk.kernel.data.model.ModuleCatalogItem
 import com.abk.kernel.data.model.ModuleCatalogRepository
+import com.abk.kernel.data.model.ModuleSetChildMetadata
 import com.abk.kernel.data.model.RuntimeModuleCatalogItem
 import com.abk.kernel.data.model.RuntimeModuleRepository
 import com.abk.kernel.ui.components.AbkScreenHorizontalPadding
@@ -453,6 +458,7 @@ private fun BuildModuleRepositoryScreenContent(
     val state by vm.uiState.collectAsState()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val coroutineScope = rememberCoroutineScope()
     val motionScheme = MaterialTheme.motionScheme
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -463,6 +469,9 @@ private fun BuildModuleRepositoryScreenContent(
     )
     var pendingCatalogModule by remember { mutableStateOf<ModuleCatalogItem?>(null) }
     var selectedCatalogModuleStages by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var pendingModuleSetMetadata by remember { mutableStateOf<ExternalModuleMetadata?>(null) }
+    var selectedModuleSetChildren by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var moduleSetStageSelections by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val mergedModulesState by produceState(
         initialValue = ModuleListComputation<BuildPageMergedCatalogModule>(
             loading = state.buildModuleRepositories.isNotEmpty()
@@ -535,6 +544,125 @@ private fun BuildModuleRepositoryScreenContent(
     }
 
     pendingCatalogModule?.let { module ->
+        if (module.kind == ModuleCatalogItemKind.MODULE_SET) {
+            val metadata = pendingModuleSetMetadata
+            if (metadata != null) {
+                val children = metadata.children
+                val addToBuildLabel = stringResource(R.string.module_repo_add_to_build)
+                AlertDialog(
+                    onDismissRequest = {
+                        pendingCatalogModule = null
+                        pendingModuleSetMetadata = null
+                        selectedModuleSetChildren = emptyList()
+                        moduleSetStageSelections = emptyMap()
+                    },
+                    icon = { Icon(Icons.Default.Extension, null) },
+                    title = { Text(module.buildDisplayName()) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = if (module.description.isNotBlank()) module.description else addToBuildLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            children.forEach { child ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = child.id in selectedModuleSetChildren,
+                                        onCheckedChange = { checked ->
+                                            selectedModuleSetChildren = if (checked) {
+                                                (selectedModuleSetChildren + child.id).distinct()
+                                            } else {
+                                                selectedModuleSetChildren - child.id
+                                            }
+                                        }
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(child.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                        if (child.description.isNotBlank()) {
+                                            Text(
+                                                child.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (child.id in selectedModuleSetChildren) {
+                                            val options = child.supportedStages
+                                            val selected = moduleSetStageSelections[child.id]
+                                                ?: child.recommendedStages.firstOrNull()
+                                                ?: child.defaultStage
+                                            Row(
+                                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                options.forEach { stage ->
+                                                    AssistChip(
+                                                        onClick = {
+                                                            moduleSetStageSelections = moduleSetStageSelections + (child.id to stage)
+                                                        },
+                                                        label = { Text(stage) },
+                                                        colors = if (stage == selected) {
+                                                            AssistChipDefaults.assistChipColors(
+                                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                                            )
+                                                        } else {
+                                                            AssistChipDefaults.assistChipColors()
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val selections = children
+                                    .filter { it.id in selectedModuleSetChildren }
+                                    .map { child ->
+                                        child to (
+                                            moduleSetStageSelections[child.id]
+                                                ?: child.recommendedStages.firstOrNull()
+                                                ?: child.defaultStage
+                                        )
+                                    }
+                                if (vm.replaceModuleSetSelection(module.repoUrl, metadata, selections)) {
+                                    pendingCatalogModule = null
+                                    pendingModuleSetMetadata = null
+                                    selectedModuleSetChildren = emptyList()
+                                    moduleSetStageSelections = emptyMap()
+                                    Toast.makeText(context, context.getString(R.string.module_repo_added_to_build), Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = selectedModuleSetChildren.isNotEmpty()
+                        ) {
+                            Text(stringResource(R.string.module_repo_add_selected))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                pendingCatalogModule = null
+                                pendingModuleSetMetadata = null
+                                selectedModuleSetChildren = emptyList()
+                                moduleSetStageSelections = emptyMap()
+                            }
+                        ) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                    }
+                )
+            }
+            return@let
+        }
         val supportedStages = module.buildNormalizedSupportedStages()
         val recommendedStages = module.buildNormalizedRecommendedStages().toSet()
         val addedStages = module.addedStages(selectedModules).toSet()
@@ -672,8 +800,25 @@ private fun BuildModuleRepositoryScreenContent(
                 onSearchQueryChange = { searchQuery = it },
                 onOpenRepositorySettings = ::openRepositorySettings,
                 onAddModule = { module ->
-                    pendingCatalogModule = module
-                    selectedCatalogModuleStages = module.initialStageSelection(selectedModules)
+                    if (module.kind == ModuleCatalogItemKind.MODULE_SET) {
+                        coroutineScope.launch {
+                            val metadata = vm.checkCustomExternalModuleMetadata(module.repoUrl)
+                            if (metadata != null) {
+                                pendingCatalogModule = module
+                                pendingModuleSetMetadata = metadata
+                                selectedModuleSetChildren = metadata.children.map { it.id }
+                                moduleSetStageSelections = metadata.children.associate { child ->
+                                    child.id to (
+                                        child.recommendedStages.firstOrNull()
+                                            ?: child.defaultStage
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        pendingCatalogModule = module
+                        selectedCatalogModuleStages = module.initialStageSelection(selectedModules)
+                    }
                 },
                 onOpenModule = { module ->
                     val url = module.homepage.ifBlank { module.repoUrl }
