@@ -3964,20 +3964,21 @@ class MainViewModel @JvmOverloads constructor(
     fun replaceModuleSetSelection(
         groupRepoUrl: String,
         metadata: ExternalModuleMetadata,
-        selections: List<Pair<ModuleSetChildMetadata, String>>
+        selections: List<Pair<ModuleSetChildMetadata, List<String>>>
     ): Boolean {
         val cleanGroupRepo = groupRepoUrl.trim()
         if (cleanGroupRepo.isBlank() || metadata.kind != ModuleCatalogItemKind.MODULE_SET) return false
-        val normalizedSelections = selections.mapNotNull { (child, stage) ->
+        val normalizedSelections = selections.flatMap { (child, stages) ->
             val childRepo = child.repoUrl.trim()
             val childId = child.id.trim()
             if (childRepo.isBlank() || childId.isBlank()) {
-                null
+                emptyList()
             } else {
-                val normalizedStage = CustomExternalModuleStage.normalize(stage)
-                if (normalizedStage !in child.supportedStages) {
-                    null
-                } else {
+                stages
+                    .map { CustomExternalModuleStage.normalize(it) }
+                    .distinct()
+                    .filter { stage -> stage in child.supportedStages }
+                    .map { normalizedStage ->
                     CustomExternalModule(
                         url = childRepo,
                         stage = normalizedStage,

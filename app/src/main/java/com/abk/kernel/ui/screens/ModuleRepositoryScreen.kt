@@ -48,8 +48,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -102,7 +100,6 @@ import com.abk.kernel.data.model.ExternalModuleMetadata
 import com.abk.kernel.data.model.ModuleCatalogItemKind
 import com.abk.kernel.data.model.ModuleCatalogItem
 import com.abk.kernel.data.model.ModuleCatalogRepository
-import com.abk.kernel.data.model.ModuleSetChildMetadata
 import com.abk.kernel.data.model.RuntimeModuleCatalogItem
 import com.abk.kernel.data.model.RuntimeModuleRepository
 import com.abk.kernel.ui.components.AbkScreenHorizontalPadding
@@ -471,7 +468,7 @@ private fun BuildModuleRepositoryScreenContent(
     var selectedCatalogModuleStages by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var pendingModuleSetMetadata by remember { mutableStateOf<ExternalModuleMetadata?>(null) }
     var selectedModuleSetChildren by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    var moduleSetStageSelections by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var moduleSetStageSelections by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     val mergedModulesState by produceState(
         initialValue = ModuleListComputation<BuildPageMergedCatalogModule>(
             loading = state.buildModuleRepositories.isNotEmpty()
@@ -592,28 +589,38 @@ private fun BuildModuleRepositoryScreenContent(
                                         }
                                         if (child.id in selectedModuleSetChildren) {
                                             val options = child.supportedStages
-                                            val selected = moduleSetStageSelections[child.id]
-                                                ?: child.recommendedStages.firstOrNull()
-                                                ?: child.defaultStage
-                                            Row(
-                                                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
+                                            val initialStages = child.recommendedStages
+                                                .filter { it in options }
+                                                .ifEmpty { listOf(child.defaultStage) }
+                                            val selectedStages = moduleSetStageSelections[child.id] ?: initialStages
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                                 options.forEach { stage ->
-                                                    AssistChip(
-                                                        onClick = {
-                                                            moduleSetStageSelections = moduleSetStageSelections + (child.id to stage)
-                                                        },
-                                                        label = { Text(stage) },
-                                                        colors = if (stage == selected) {
-                                                            AssistChipDefaults.assistChipColors(
-                                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                                            )
-                                                        } else {
-                                                            AssistChipDefaults.assistChipColors()
-                                                        }
-                                                    )
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Checkbox(
+                                                            checked = stage in selectedStages,
+                                                            onCheckedChange = { checked ->
+                                                                val updatedStages = if (checked) {
+                                                                    (selectedStages + stage).distinct()
+                                                                } else {
+                                                                    selectedStages - stage
+                                                                }
+                                                                moduleSetStageSelections = moduleSetStageSelections + (child.id to updatedStages)
+                                                            }
+                                                        )
+                                                        Text(
+                                                            text = buildString {
+                                                                append(stage)
+                                                                if (stage in child.recommendedStages) {
+                                                                    append(stringResource(R.string.module_repo_recommended))
+                                                                }
+                                                            },
+                                                            style = MaterialTheme.typography.bodySmall
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -630,10 +637,19 @@ private fun BuildModuleRepositoryScreenContent(
                                     .map { child ->
                                         child to (
                                             moduleSetStageSelections[child.id]
-                                                ?: child.recommendedStages.firstOrNull()
-                                                ?: child.defaultStage
+                                                ?.distinct()
+                                                ?.filter { stage -> stage in child.supportedStages }
+                                                ?.ifEmpty {
+                                                    child.recommendedStages
+                                                        .filter { stage -> stage in child.supportedStages }
+                                                        .ifEmpty { listOf(child.defaultStage) }
+                                                }
+                                                ?: child.recommendedStages
+                                                    .filter { stage -> stage in child.supportedStages }
+                                                    .ifEmpty { listOf(child.defaultStage) }
                                         )
                                     }
+                                    .filter { (_, stages) -> stages.isNotEmpty() }
                                 if (vm.replaceModuleSetSelection(module.repoUrl, metadata, selections)) {
                                     pendingCatalogModule = null
                                     pendingModuleSetMetadata = null
@@ -642,7 +658,15 @@ private fun BuildModuleRepositoryScreenContent(
                                     Toast.makeText(context, context.getString(R.string.module_repo_added_to_build), Toast.LENGTH_SHORT).show()
                                 }
                             },
-                            enabled = selectedModuleSetChildren.isNotEmpty()
+                            enabled = selectedModuleSetChildren.isNotEmpty() && children
+                                .filter { it.id in selectedModuleSetChildren }
+                                .all { child ->
+                                    val selectedStages = moduleSetStageSelections[child.id]
+                                        ?: child.recommendedStages
+                                            .filter { stage -> stage in child.supportedStages }
+                                            .ifEmpty { listOf(child.defaultStage) }
+                                    selectedStages.any { stage -> stage in child.supportedStages }
+                                }
                         ) {
                             Text(stringResource(R.string.module_repo_add_selected))
                         }
@@ -808,10 +832,9 @@ private fun BuildModuleRepositoryScreenContent(
                                 pendingModuleSetMetadata = metadata
                                 selectedModuleSetChildren = metadata.children.map { it.id }
                                 moduleSetStageSelections = metadata.children.associate { child ->
-                                    child.id to (
-                                        child.recommendedStages.firstOrNull()
-                                            ?: child.defaultStage
-                                    )
+                                    child.id to child.recommendedStages
+                                        .filter { stage -> stage in child.supportedStages }
+                                        .ifEmpty { listOf(child.defaultStage) }
                                 }
                             }
                         }
