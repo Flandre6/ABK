@@ -2063,21 +2063,21 @@ if [ "${'$'}{AK3_TARGET_SLOT_MODE:-active}" = "inactive" ]; then
   mkdir -p "${'$'}FAKEBIN"
   cat > "${'$'}FAKEBIN/getprop" <<'EOF'
 #!/system/bin/sh
-REAL_GETPROP="${REAL_GETPROP:-/system/bin/getprop}"
-TARGET_SLOT_SUFFIX="${TARGET_SLOT_SUFFIX:-}"
-TARGET_SLOT_NAME="${TARGET_SLOT_NAME:-}"
+REAL_GETPROP="${'$'}{REAL_GETPROP:-/system/bin/getprop}"
+TARGET_SLOT_SUFFIX="${'$'}{TARGET_SLOT_SUFFIX:-}"
+TARGET_SLOT_NAME="${'$'}{TARGET_SLOT_NAME:-}"
 if [ "$#" -eq 0 ]; then
-  exec "${REAL_GETPROP}"
+  exec "${'$'}{REAL_GETPROP}"
 fi
 case "$1" in
   ro.boot.slot_suffix)
-    [ -n "${TARGET_SLOT_SUFFIX}" ] && { printf '%s\n' "${TARGET_SLOT_SUFFIX}"; exit 0; }
+    [ -n "${'$'}{TARGET_SLOT_SUFFIX}" ] && { printf '%s\n' "${'$'}{TARGET_SLOT_SUFFIX}"; exit 0; }
     ;;
   ro.boot.slot)
-    [ -n "${TARGET_SLOT_NAME}" ] && { printf '%s\n' "${TARGET_SLOT_NAME}"; exit 0; }
+    [ -n "${'$'}{TARGET_SLOT_NAME}" ] && { printf '%s\n' "${'$'}{TARGET_SLOT_NAME}"; exit 0; }
     ;;
 esac
-exec "${REAL_GETPROP}" "$@"
+exec "${'$'}{REAL_GETPROP}" "$@"
 EOF
   chmod 755 "${'$'}FAKEBIN/getprop"
   export REAL_GETPROP TARGET_SLOT_SUFFIX TARGET_SLOT_NAME ACTUAL_SLOT_SUFFIX
