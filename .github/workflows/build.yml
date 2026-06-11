@@ -3697,6 +3697,41 @@ jobs:
               print(f"已补齐 {path} 的 Official SUSFS hook 符号")
               return True
 
+          def ensure_official_susfs_dispatch_compat(ksu_dir):
+              path = ksu_dir / "supercall/dispatch.c"
+              if not path.exists():
+                  raise SystemExit(f"未找到 {path}，无法补齐 Official SUSFS supercall 声明")
+
+              text = path.read_text()
+              if not any(marker in text for marker in ("SUSFS_MAGIC", "CMD_SUSFS_", "susfs_")):
+                  return False
+
+              original = text
+              missing = []
+              if "#include <linux/namei.h>" not in text:
+                  missing.append("#include <linux/namei.h>")
+              if "#include <linux/susfs.h>" not in text:
+                  missing.append("#include <linux/susfs.h>")
+              if missing:
+                  line = "\n".join(missing) + "\n"
+                  for anchor in (
+                      "#include <linux/thread_info.h>\n",
+                      "#include <linux/version.h>\n",
+                      "#include <linux/uaccess.h>\n",
+                  ):
+                      if anchor in text:
+                          text = text.replace(anchor, anchor + line, 1)
+                          break
+                  else:
+                      raise SystemExit(f"{path} 缺少 Official SUSFS supercall include 插入锚点")
+
+              if text == original:
+                  return False
+
+              path.write_text(text)
+              print(f"已补齐 {path} 的 Official SUSFS supercall 声明")
+              return True
+
           ksu_dir = Path("common/drivers/kernelsu")
           if not ksu_dir.exists():
               raise SystemExit("未找到 common/drivers/kernelsu，无法修复 Official SUSFS")
@@ -3750,6 +3785,7 @@ jobs:
           changed = ensure_official_susfs_objects(ksu_dir) or changed
           changed = patch_official_selinux_hide(ksu_dir) or changed
           changed = ensure_official_symbol_resolver_exports(ksu_dir) or changed
+          changed = ensure_official_susfs_dispatch_compat(ksu_dir) or changed
           changed = ensure_official_runtime_compat(ksu_dir) or changed
           changed = ensure_official_boot_event_compat(ksu_dir) or changed
 
@@ -3783,6 +3819,18 @@ jobs:
           boot_event_c = ksu_dir / "runtime/boot_event.c"
           if boot_event_c.exists() and "void ksu_stop_input_hook_runtime(void);" not in boot_event_c.read_text():
               raise SystemExit(f"{boot_event_c} 缺少 ksu_stop_input_hook_runtime 声明")
+
+          dispatch_c = ksu_dir / "supercall/dispatch.c"
+          if dispatch_c.exists():
+              dispatch_text = dispatch_c.read_text()
+              if any(marker in dispatch_text for marker in ("SUSFS_MAGIC", "CMD_SUSFS_", "susfs_")):
+                  missing = [
+                      include
+                      for include in ("#include <linux/namei.h>", "#include <linux/susfs.h>")
+                      if include not in dispatch_text
+                  ]
+                  if missing:
+                      raise SystemExit(f"{dispatch_c} 缺少 Official SUSFS supercall include: {missing}")
 
           selinux_hide_c = ksu_dir / "feature/selinux_hide.c"
           if selinux_hide_c.exists():
