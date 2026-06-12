@@ -13,10 +13,10 @@ An automation repository and Android app for building, distributing, and managin
 
 [简体中文](README.md) | English
 
-## Sponser
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/xingguangcuican)
-
 </div>
+
+## Sponsor for me
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/xingguangcuican)
 
 ## Purpose
 
