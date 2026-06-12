@@ -34,6 +34,7 @@ data class AbkExtensionState(
     val rawJson: String = "",
     val oobeCompleted: Boolean = false,
     val summary: String = "",
+    val hasConfiguration: Boolean = false,
 )
 
 data class AbkManagedExtension(
@@ -56,7 +57,7 @@ data class AbkManagedExtension(
         get() = discoveredApp != null
 
     val needsOobe: Boolean
-        get() = state?.oobeCompleted != true
+        get() = state?.hasConfiguration != true
 
     val summary: String
         get() = state?.summary.orEmpty()
@@ -119,6 +120,20 @@ fun abkLaunchExtensionSettings(activity: Activity, extension: AbkManagedExtensio
     return true
 }
 
+fun abkLaunchExtensionCompanionApp(activity: Activity, extension: AbkManagedExtension): Boolean {
+    val packageName = extension.discoveredApp?.packageName
+        ?: extension.companionPackage.takeIf { it.isNotBlank() }
+        ?: return false
+    val launchIntent = activity.packageManager.getLaunchIntentForPackage(packageName) ?: return false
+    activity.startActivity(
+        launchIntent
+            .putExtra(ABK_EXTENSION_EXTRA_ID, extension.extensionId)
+            .putExtra(ABK_EXTENSION_EXTRA_HOST_PACKAGE, activity.packageName)
+            .putExtra(ABK_EXTENSION_EXTRA_HOST_PROVIDER, abkExtensionHostAuthority(activity))
+    )
+    return true
+}
+
 private fun toManagedExtension(
     module: AbkRuntimeModule,
     discoveredApp: AbkDiscoveredExtensionApp?,
@@ -145,12 +160,23 @@ private fun toManagedExtension(
 }
 
 private fun parseExtensionState(rawJson: String): AbkExtensionState {
-    val json = runCatching { JSONObject(rawJson) }.getOrNull() ?: return AbkExtensionState(rawJson = rawJson)
+    val json = runCatching { JSONObject(rawJson) }.getOrNull()
+        ?: return AbkExtensionState(
+            rawJson = rawJson,
+            hasConfiguration = rawJson.isNotBlank()
+        )
+    val summary = json.optString("summary").takeIf { it.isNotBlank() }
+        ?: json.optJSONObject("settings")?.optString("mode").orEmpty()
+    val oobeCompleted = json.optBoolean("oobe_completed", false)
+    val hasSettings = (json.optJSONObject("settings")?.length() ?: 0) > 0
+    val hasExtraState = json.keys().asSequence().any { key ->
+        key !in setOf("oobe_completed", "summary")
+    }
     return AbkExtensionState(
         rawJson = rawJson,
-        oobeCompleted = json.optBoolean("oobe_completed", false),
-        summary = json.optString("summary").takeIf { it.isNotBlank() }
-            ?: json.optJSONObject("settings")?.optString("mode").orEmpty()
+        oobeCompleted = oobeCompleted,
+        summary = summary,
+        hasConfiguration = oobeCompleted || summary.isNotBlank() || hasSettings || hasExtraState,
     )
 }
 
