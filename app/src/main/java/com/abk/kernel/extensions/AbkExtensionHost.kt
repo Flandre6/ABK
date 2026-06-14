@@ -195,6 +195,21 @@ fun abkLaunchExtensionOobe(activity: Activity, extension: AbkManagedExtension): 
 
 fun abkLaunchExtensionServiceActivity(activity: Activity, extension: AbkManagedExtension): Boolean {
     val component = extension.serviceComponent ?: return false
+    val extras = mapOf(
+        ABK_EXTENSION_EXTRA_ID to extension.extensionId,
+        ABK_EXTENSION_EXTRA_HOST_PACKAGE to activity.packageName,
+        ABK_EXTENSION_EXTRA_HOST_PROVIDER to abkExtensionHostAuthority(activity),
+    )
+    if (extension.canStartServiceSilently) {
+        val rootResult = RootUtils.launchServiceAsRoot(
+            componentName = component.flattenToShortString(),
+            extras = extras,
+            foreground = true
+        )
+        if (rootResult.success) {
+            return true
+        }
+    }
     val intent = Intent().setComponent(component)
         .putExtra(ABK_EXTENSION_EXTRA_ID, extension.extensionId)
         .putExtra(ABK_EXTENSION_EXTRA_HOST_PACKAGE, activity.packageName)
