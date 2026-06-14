@@ -5,10 +5,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.os.Build
-import android.content.pm.PackageManager.ComponentInfoFlags
 import android.content.pm.PackageManager.GET_SERVICES
+import android.content.pm.PackageInfoFlags
+import android.content.pm.ResolveInfo
 import com.abk.kernel.data.model.CustomExternalModuleEntryKind
 import com.abk.kernel.data.model.AbkRuntimeModule
 import com.abk.kernel.data.model.AbkRuntimeStatus
@@ -377,7 +377,7 @@ private fun isServiceComponent(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.getPackageInfo(
                 packageName,
-                ComponentInfoFlags.of(PackageManager.GET_SERVICES.toLong())
+                PackageInfoFlags.of(PackageManager.GET_SERVICES.toLong())
             )
         } else {
             packageManager.getPackageInfo(packageName, GET_SERVICES)
