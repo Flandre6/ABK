@@ -759,6 +759,8 @@ data class DownloadedArtifact(
     val runNumber: Int = 0,
     val sourceAssetId: Long = 0L,
     val sourceAssetName: String? = null,
+    val verified: Boolean = false,
+    val verificationSummary: String? = null,
     val category: ArtifactCategory = type.toArtifactCategory()
 )
 

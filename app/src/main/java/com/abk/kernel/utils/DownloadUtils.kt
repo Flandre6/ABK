@@ -72,7 +72,9 @@ object DownloadUtils {
     private data class LocalDownloadEntry(
         val displayName: String,
         val file: File,
-        val type: ArtifactType
+        val type: ArtifactType,
+        val verified: Boolean = false,
+        val verificationSummary: String? = null
     )
 
     private data class BundledMagiskModuleDependency(
@@ -293,10 +295,18 @@ object DownloadUtils {
                 downloadedZip.delete()
                 zipFile = null
                 collectCandidateFiles(targetOutDir).map { candidate ->
+                    val type = classifyDownloadedFile(candidate)
+            val verification = if (ArtifactVerification.requiresTrustedBundle(type)) {
+                ArtifactVerification.verifyBundleFile(candidate, type)
+            } else {
+                null
+            }
                     LocalDownloadEntry(
                         displayName = candidate.name,
                         file = candidate,
-                        type = classifyDownloadedFile(candidate)
+                        type = type,
+                        verified = verification?.success == true,
+                        verificationSummary = verification?.message
                     )
                 }
             }
@@ -314,6 +324,8 @@ object DownloadUtils {
                             ?: context.getString(R.string.workflow_unlinked),
                         runNumber = run?.runNumber ?: 0,
                         sourceAssetName = artifact.name,
+                        verified = entry.verified,
+                        verificationSummary = entry.verificationSummary,
                         category = entry.type.toArtifactCategory()
                     )
                 }
@@ -475,10 +487,18 @@ object DownloadUtils {
                     listOf(downloadedFile)
                 }
                 files.map { candidate ->
+                    val type = classifyDownloadedFile(candidate)
+                    val verification = if (ArtifactVerification.requiresTrustedBundle(type)) {
+                        ArtifactVerification.verifyBundleFile(candidate, type)
+                    } else {
+                        null
+                    }
                     LocalDownloadEntry(
                         displayName = candidate.name,
                         file = candidate,
-                        type = classifyDownloadedFile(candidate)
+                        type = type,
+                        verified = verification?.success == true,
+                        verificationSummary = verification?.message
                     )
                 }
             }
@@ -496,6 +516,8 @@ object DownloadUtils {
                         runNumber = 0,
                         sourceAssetId = sourceAssetId,
                         sourceAssetName = name,
+                        verified = entry.verified,
+                        verificationSummary = entry.verificationSummary,
                         category = entry.type.toArtifactCategory()
                     )
                 }
@@ -605,32 +627,33 @@ object DownloadUtils {
         artifact: DownloadedArtifact
     ): PreparedDownloadedArtifact {
         val source = File(artifact.filePath)
-        if (!source.exists() || !looksLikeNoticeBundle(source)) {
+        if (!source.exists()) {
             return PreparedDownloadedArtifact(source)
         }
+        if (ArtifactVerification.requiresTrustedBundle(artifact.type)) {
+            val verification = ArtifactVerification.verifyBundleFile(source, artifact.type)
+            if (!verification.success) {
+                throw IllegalStateException(verification.message)
+            }
+            val extractDir = createStageDir(context, "prepared-${safeFileName(artifact.name)}")
+            unzip(source, extractDir)
+            val payload = File(extractDir, verification.manifest.payloadName)
+                .takeIf(File::isFile)
+                ?: throw IllegalStateException("Bundled artifact missing payload: ${artifact.name}")
+            return PreparedDownloadedArtifact(payload, extractDir)
+        }
 
+        if (!looksLikeNoticeBundle(source)) {
+            return PreparedDownloadedArtifact(source)
+        }
         val extractDir = createStageDir(context, "prepared-${safeFileName(artifact.name)}")
         unzip(source, extractDir)
         val manifest = File(extractDir, BUNDLE_MANIFEST_FILE_NAME)
         val manifestText = manifest.takeIf { it.isFile }?.readText()
         val payloadName = parseBundledPayloadName(manifestText)
         val payload = payloadName?.let { File(extractDir, it).takeIf(File::isFile) }
-            ?: extractDir.walkTopDown()
-                .firstOrNull {
-                    it.isFile &&
-                        it.name != BUNDLE_MANIFEST_FILE_NAME &&
-                        !isBundledNoticeFileName(it.name)
-                }
             ?: throw IllegalStateException("Bundled artifact missing payload: ${artifact.name}")
-        val dependencyModules = parseBundledDependencyNames(manifestText)
-            .mapNotNull { relativePath ->
-                File(extractDir, relativePath).takeIf(File::isFile)
-            }
-        val dependencyApps = parseBundledCompanionAppNames(manifestText)
-            .mapNotNull { relativePath ->
-                File(extractDir, relativePath).takeIf(File::isFile)
-            }
-        return PreparedDownloadedArtifact(payload, extractDir, dependencyModules, dependencyApps)
+        return PreparedDownloadedArtifact(payload, extractDir)
     }
 
     private fun runFolderName(run: WorkflowRun?): String {
@@ -836,10 +859,17 @@ object DownloadUtils {
         }
         val persistedBundle = File(candidateDir, downloadedFile.name)
         downloadedFile.copyTo(persistedBundle, overwrite = true)
+        val verification = if (ArtifactVerification.requiresTrustedBundle(classifyDownloadedFile(persistedBundle))) {
+            ArtifactVerification.verifyBundleFile(persistedBundle, classifyDownloadedFile(persistedBundle))
+        } else {
+            null
+        }
         return LocalDownloadEntry(
             displayName = displayName,
             file = persistedBundle,
-            type = classifyDownloadedFile(persistedBundle)
+            type = classifyDownloadedFile(persistedBundle),
+            verified = verification?.success == true,
+            verificationSummary = verification?.message
         )
     }
 
@@ -900,6 +930,7 @@ object DownloadUtils {
             }
         }.getOrDefault(false)
     }
+
 
     private fun parseBundledPayloadName(manifest: String?): String? =
         manifest
