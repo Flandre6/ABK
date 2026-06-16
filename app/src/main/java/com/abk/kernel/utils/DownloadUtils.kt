@@ -57,7 +57,8 @@ object DownloadUtils {
         val file: File,
         val cleanupDir: File? = null,
         val dependencyModules: List<File> = emptyList(),
-        val dependencyApps: List<File> = emptyList()
+        val dependencyApps: List<File> = emptyList(),
+        val legacyBundleManifest: String? = null
     )
 
     data class AppUpdatePackageResult(
@@ -635,7 +636,8 @@ object DownloadUtils {
 
     fun prepareDownloadedArtifact(
         context: Context,
-        artifact: DownloadedArtifact
+        artifact: DownloadedArtifact,
+        allowHighRiskFallback: Boolean = false
     ): PreparedDownloadedArtifact {
         val source = File(artifact.filePath)
         if (!source.exists()) {
@@ -664,6 +666,20 @@ object DownloadUtils {
                 )
             }
             if (!verification.success) {
+                if (allowHighRiskFallback && looksLikeLegacyNoticeBundle(source)) {
+                    val extractDir = createStageDir(context, "prepared-${safeFileName(artifact.name)}")
+                    unzip(source, extractDir)
+                    val manifest = File(extractDir, BUNDLE_MANIFEST_FILE_NAME)
+                    val manifestText = manifest.takeIf { it.isFile }?.readText()
+                    val payloadName = parseBundledPayloadName(manifestText)
+                    val payload = payloadName?.let { File(extractDir, it).takeIf(File::isFile) }
+                        ?: throw IllegalStateException("Bundled artifact missing payload: ${artifact.name}")
+                    return PreparedDownloadedArtifact(
+                        payload,
+                        extractDir,
+                        legacyBundleManifest = manifestText
+                    )
+                }
                 throw IllegalStateException(verification.message)
             }
             val extractDir = createStageDir(context, "prepared-${safeFileName(artifact.name)}")
@@ -953,6 +969,16 @@ object DownloadUtils {
         return runCatching {
             ZipFile(file).use { zip ->
                 zip.getEntry(BUNDLE_MANIFEST_FILE_NAME) != null
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun looksLikeLegacyNoticeBundle(file: File): Boolean {
+        if (!looksLikeNoticeBundle(file)) return false
+        return runCatching {
+            ZipFile(file).use { zip ->
+                zip.getEntry("ABK_BUNDLE_MANIFEST.json") == null &&
+                    zip.getEntry("ABK_BUNDLE_MANIFEST.sig") == null
             }
         }.getOrDefault(false)
     }
