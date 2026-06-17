@@ -40,6 +40,8 @@ object DownloadUtils {
     private const val LICENSE_FILE_NAME = "LICENSE"
     private const val THIRD_PARTY_NOTICES_FILE_NAME = "THIRD_PARTY_NOTICES.md"
     private const val BUNDLE_MANIFEST_FILE_NAME = "ABK_BUNDLE_MANIFEST.txt"
+    private const val SIGNED_BUNDLE_MANIFEST_FILE_NAME = "ABK_BUNDLE_MANIFEST.json"
+    private const val SIGNED_BUNDLE_SIGNATURE_FILE_NAME = "ABK_BUNDLE_MANIFEST.sig"
     private const val FLASH_DEPENDENCIES_FILE_NAME = "ABK_FLASH_DEPENDENCIES.json"
     private const val BUNDLE_DEPENDENCY_DIR_NAME = "magisk-dependencies"
     private const val NOTICE_STAGING_DIR_NAME = "__abk_notices"
@@ -87,6 +89,11 @@ object DownloadUtils {
     private data class BundledCompanionAppDependency(
         val name: String,
         val downloadUrl: String
+    )
+
+    private data class BundleVerificationState(
+        val verified: Boolean,
+        val summary: String?
     )
 
     fun classifyArtifact(name: String): ArtifactType {
@@ -280,11 +287,17 @@ object DownloadUtils {
                     }
                 val bundledDependencies = resolveBundledMagiskModules(stagingRoot, token)
                 val bundledCompanionApps = resolveBundledCompanionApps(stagingRoot, token)
+                val signingPublicKey = PreferencesRepository(context).readForkArtifactSigningPublicKeyBlocking()
+                val signingPublicKeyPem = signingPublicKey
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(ForkSigningManager::publicKeyPemFromBase64)
 
                 createBundledDownloadEntries(
+                    context = context,
                     bundleRootDir = requireNotNull(outDir),
                     candidates = candidates,
                     notices = notices,
+                    signingPublicKeyPem = signingPublicKeyPem,
                     bundledDependencies = bundledDependencies,
                     bundledCompanionApps = bundledCompanionApps
                 )
@@ -469,9 +482,11 @@ object DownloadUtils {
                 val bundledDependencies = resolveBundledMagiskModules(requireNotNull(stageDir), token)
                 val bundledCompanionApps = resolveBundledCompanionApps(requireNotNull(stageDir), token)
                 createBundledDownloadEntries(
+                    context = context,
                     bundleRootDir = requireNotNull(assetDir),
                     candidates = candidateFiles,
                     notices = notices,
+                    signingPublicKeyPem = null,
                     bundledDependencies = bundledDependencies,
                     bundledCompanionApps = bundledCompanionApps
                 )
@@ -862,13 +877,23 @@ object DownloadUtils {
     }
 
     private fun createBundledDownloadEntries(
+        context: Context,
         bundleRootDir: File,
         candidates: List<File>,
         notices: NoticeFiles,
+        signingPublicKeyPem: String? = null,
         bundledDependencies: List<File> = emptyList(),
         bundledCompanionApps: List<File> = emptyList()
     ): List<LocalDownloadEntry> {
         return candidates.mapIndexed { index, candidate ->
+            if (candidate.name.lowercase(Locale.ROOT).endsWith(".bundle.zip")) {
+                return@mapIndexed persistBundledDownloadEntry(
+                    context = context,
+                    bundleRootDir = bundleRootDir,
+                    downloadedFile = candidate,
+                    signingPublicKeyPem = signingPublicKeyPem
+                )
+            }
             val dirName = safeFileName(candidate.name).ifBlank { "artifact-${index + 1}" }
             val candidateDir = File(bundleRootDir, dirName).apply {
                 if (exists()) deleteRecursively()
@@ -886,17 +911,26 @@ object DownloadUtils {
                 emptyList()
             }
             createNoticeBundle(bundleFile, candidate, notices, dependenciesForPayload, appsForPayload)
+            val type = classifyDownloadedFile(candidate)
             LocalDownloadEntry(
                 displayName = candidate.name,
                 file = bundleFile,
-                type = classifyDownloadedFile(candidate)
+                type = type,
+                verified = false,
+                verificationSummary = if (ArtifactVerification.requiresTrustedBundle(type)) {
+                    context.getString(R.string.flash_bundle_legacy_requires_confirmation)
+                } else {
+                    null
+                }
             )
         }
     }
 
     private fun persistBundledDownloadEntry(
+        context: Context,
         bundleRootDir: File,
-        downloadedFile: File
+        downloadedFile: File,
+        signingPublicKeyPem: String? = null
     ): LocalDownloadEntry {
         val displayName = normalizedArtifactName(downloadedFile.name)
         val dirName = safeFileName(displayName).ifBlank { "artifact-bundle" }
@@ -906,12 +940,19 @@ object DownloadUtils {
         }
         val persistedBundle = File(candidateDir, downloadedFile.name)
         downloadedFile.copyTo(persistedBundle, overwrite = true)
+        val type = classifyDownloadedFile(persistedBundle)
+        val verification = inspectBundleVerification(
+            context = context,
+            bundleFile = persistedBundle,
+            type = type,
+            signingPublicKeyPem = signingPublicKeyPem
+        )
         return LocalDownloadEntry(
             displayName = displayName,
             file = persistedBundle,
-            type = classifyDownloadedFile(persistedBundle),
-            verified = false,
-            verificationSummary = null
+            type = type,
+            verified = verification?.verified == true,
+            verificationSummary = verification?.summary
         )
     }
 
@@ -977,10 +1018,49 @@ object DownloadUtils {
         if (!looksLikeNoticeBundle(file)) return false
         return runCatching {
             ZipFile(file).use { zip ->
-                zip.getEntry("ABK_BUNDLE_MANIFEST.json") == null &&
-                    zip.getEntry("ABK_BUNDLE_MANIFEST.sig") == null
+                zip.getEntry(SIGNED_BUNDLE_MANIFEST_FILE_NAME) == null &&
+                    zip.getEntry(SIGNED_BUNDLE_SIGNATURE_FILE_NAME) == null
             }
         }.getOrDefault(false)
+    }
+
+    private fun looksLikeSignedBundle(file: File): Boolean {
+        if (!file.isFile || !file.extension.equals("zip", ignoreCase = true)) return false
+        return runCatching {
+            ZipFile(file).use { zip ->
+                zip.getEntry(SIGNED_BUNDLE_MANIFEST_FILE_NAME) != null
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun inspectBundleVerification(
+        context: Context,
+        bundleFile: File,
+        type: ArtifactType,
+        signingPublicKeyPem: String?
+    ): BundleVerificationState? {
+        if (!ArtifactVerification.requiresTrustedBundle(type)) return null
+        if (looksLikeLegacyNoticeBundle(bundleFile)) {
+            return BundleVerificationState(
+                verified = false,
+                summary = context.getString(R.string.flash_bundle_legacy_requires_confirmation)
+            )
+        }
+        if (!signingPublicKeyPem.isNullOrBlank()) {
+            val result = ArtifactVerification.verifyBundleFile(bundleFile, type, signingPublicKeyPem)
+            return BundleVerificationState(
+                verified = result.success,
+                summary = result.message
+            )
+        }
+        return BundleVerificationState(
+            verified = false,
+            summary = if (looksLikeSignedBundle(bundleFile)) {
+                context.getString(R.string.flash_bundle_unverified_requires_confirmation)
+            } else {
+                context.getString(R.string.flash_bundle_legacy_requires_confirmation)
+            }
+        )
     }
 
 
