@@ -4,6 +4,7 @@ subdir-ccflags-y += -I$(src)/vendor/include
 subdir-ccflags-y += -Wno-deprecated-declarations
 
 obj-$(CONFIG_CRYPTO_ZSTDP) += zstdp.o
+obj-$(CONFIG_CRYPTO_ZSTDP) += zstdp_vendor_unprefixed.o
 
 zstdp-y := zstdp_wrapper.o zstdp_vendor_prefixed.o
 
