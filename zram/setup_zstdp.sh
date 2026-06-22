@@ -370,6 +370,8 @@ integrate() {
   copy_file "$cache_dir/include/linux/zstd.h" "$vendor_root/include/linux/zstd.h"
   copy_file "$cache_dir/include/linux/zstd_lib.h" "$vendor_root/include/linux/zstd_lib.h"
   copy_file "$cache_dir/include/linux/zstd_errors.h" "$vendor_root/include/linux/zstd_errors.h"
+  copy_file "$repo_root/zram/zstdp/vendor_include_linux_unaligned.h" \
+    "$vendor_root/include/linux/unaligned.h"
 
   patch_crypto_files "$common_root"
   patch_zram_files "$common_root"
