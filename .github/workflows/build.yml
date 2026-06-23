@@ -3646,6 +3646,67 @@ jobs:
               print(f"已补齐 {path} 的 ksu_stop_input_hook_runtime 声明")
               return True
 
+          def official_sulog_argv_is_pointer(event_text, symbol):
+              pattern = re.compile(
+                  rf"{re.escape(symbol)}\s*\([^;]*?\bstruct\s+user_arg_ptr\s*\*\s*argv_user\b",
+                  re.S,
+              )
+              return pattern.search(event_text) is not None
+
+          def ensure_official_sulog_argv_compat(ksu_dir):
+              event_h = ksu_dir / "sulog/event.h"
+              if not event_h.exists():
+                  return False
+
+              event_text = event_h.read_text()
+
+              def patch_call_second_arg(path, symbol):
+                  if not path.exists():
+                      raise SystemExit(f"未找到 {path}，无法修复 {symbol} argv 参数类型")
+
+                  text = path.read_text()
+                  match = re.search(
+                      rf"{re.escape(symbol)}\s*\(\s*[^,\n]+,\s*([^,\n]+)\s*,",
+                      text,
+                  )
+                  if not match:
+                      return False
+
+                  current_arg = match.group(1).strip()
+                  if current_arg in (
+                      "(struct user_arg_ptr *)argv_user",
+                      "(struct user_arg_ptr*)argv_user",
+                      "&argv",
+                  ):
+                      return False
+
+                  if current_arg != "argv_user":
+                      raise SystemExit(f"{path} 的 {symbol} 第二参数为未知形态: {current_arg}")
+
+                  updated = (
+                      text[:match.start(1)]
+                      + "(struct user_arg_ptr *)argv_user"
+                      + text[match.end(1):]
+                  )
+                  path.write_text(updated)
+                  print(f"已修复 {path} 的 {symbol} argv 参数类型")
+                  return True
+
+              changed = False
+              if official_sulog_argv_is_pointer(event_text, "ksu_sulog_capture_sucompat"):
+                  changed = patch_call_second_arg(
+                      ksu_dir / "feature/sucompat.c",
+                      "ksu_sulog_capture_sucompat",
+                  ) or changed
+
+              if official_sulog_argv_is_pointer(event_text, "ksu_sulog_capture_root_execve"):
+                  changed = patch_call_second_arg(
+                      ksu_dir / "hook/syscall_event_bridge.c",
+                      "ksu_sulog_capture_root_execve",
+                  ) or changed
+
+              return changed
+
           def ensure_line_after_any(text, anchors, line, error_message):
               if line in text:
                   return text
@@ -4018,6 +4079,7 @@ jobs:
           changed = ensure_official_susfs_dispatch_compat(ksu_dir) or changed
           changed = ensure_official_runtime_compat(ksu_dir) or changed
           changed = ensure_official_boot_event_compat(ksu_dir) or changed
+          changed = ensure_official_sulog_argv_compat(ksu_dir) or changed
 
           runtime_c = ksu_dir / "runtime/ksud_integration.c"
           if runtime_c.exists():
@@ -4049,6 +4111,30 @@ jobs:
           boot_event_c = ksu_dir / "runtime/boot_event.c"
           if boot_event_c.exists() and "void ksu_stop_input_hook_runtime(void);" not in boot_event_c.read_text():
               raise SystemExit(f"{boot_event_c} 缺少 ksu_stop_input_hook_runtime 声明")
+
+          event_h = ksu_dir / "sulog/event.h"
+          if event_h.exists():
+              event_text = event_h.read_text()
+
+              sucompat_c = ksu_dir / "feature/sucompat.c"
+              if official_sulog_argv_is_pointer(event_text, "ksu_sulog_capture_sucompat"):
+                  if not sucompat_c.exists():
+                      raise SystemExit(f"未找到 {sucompat_c}，无法校验 Official sulog sucompat argv 兼容")
+                  if re.search(
+                      r"ksu_sulog_capture_sucompat\s*\(\s*[^,\n]+,\s*argv_user\s*,",
+                      sucompat_c.read_text(),
+                  ):
+                      raise SystemExit(f"{sucompat_c} 仍以裸 argv_user 调用 ksu_sulog_capture_sucompat")
+
+              bridge_c = ksu_dir / "hook/syscall_event_bridge.c"
+              if official_sulog_argv_is_pointer(event_text, "ksu_sulog_capture_root_execve"):
+                  if not bridge_c.exists():
+                      raise SystemExit(f"未找到 {bridge_c}，无法校验 Official sulog root_execve argv 兼容")
+                  if re.search(
+                      r"ksu_sulog_capture_root_execve\s*\(\s*[^,\n]+,\s*argv_user\s*,",
+                      bridge_c.read_text(),
+                  ):
+                      raise SystemExit(f"{bridge_c} 仍以裸 argv_user 调用 ksu_sulog_capture_root_execve")
 
           dispatch_c = ksu_dir / "supercall/dispatch.c"
           if dispatch_c.exists():
