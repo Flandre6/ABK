@@ -166,13 +166,7 @@ jobs:
           fi
 
           if [ "$effective_use_zram" = "true" ] && [ "$effective_zram_full_algo" != "true" ] && [ -n "$effective_zram_extra_algos" ]; then
-            if python3 - "$effective_zram_extra_algos" <<'PY'
-import sys
-
-algos = [item.strip().lower() for item in sys.argv[1].split(",") if item.strip()]
-raise SystemExit(0 if "zstdp" in algos else 1)
-PY
-            then
+            if python3 -c 'import sys; algos=[item.strip().lower() for item in sys.argv[1].split(",") if item.strip()]; raise SystemExit(0 if "zstdp" in algos else 1)' "$effective_zram_extra_algos"; then
               effective_zram_use_optional_algo="true"
             fi
           fi
